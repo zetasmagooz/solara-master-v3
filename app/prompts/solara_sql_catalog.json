@@ -1,0 +1,444 @@
+{
+  "version": "2026-03-02",
+  "timezone_local": "America/Mexico_City",
+  "db": "postgres",
+  "schema": "public",
+  "enums": {
+    "payment_method": {
+      "cash": "efectivo",
+      "card": "tarjeta",
+      "transfer": "transferencia",
+      "platform": "plataformas (uber, didi, rappi)"
+    },
+    "sale_status": {
+      "completed": "completada",
+      "paid": "pagada",
+      "order": "orden (pendiente de cobro)",
+      "cancelled": "cancelada",
+      "returned": "devuelta"
+    },
+    "discount_type": {
+      "percentage": "porcentaje",
+      "fixed": "monto fijo"
+    }
+  },
+  "derived_rules": {
+    "venta_valida_condition": "sa.status NOT IN ('cancelled', 'returned')",
+    "timezone_conversion": "col AT TIME ZONE 'America/Mexico_City'",
+    "store_filter": "store_id = $1::uuid"
+  },
+  "tables": {
+    "sales": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "order_id": "uuid FK orders.id NULL",
+        "user_id": "uuid FK users.id NULL (cajero/vendedor que realizó la venta)",
+        "customer_id": "uuid FK customers.id NULL (cliente asociado)",
+        "sale_number": "varchar(50) NULL (ej: TKT-2026-0001)",
+        "subtotal": "numeric(12,2)",
+        "tax": "numeric(12,2)",
+        "discount": "numeric(12,2)",
+        "discount_type": "varchar(20) NULL (percentage|fixed)",
+        "tax_type": "varchar(20) NULL",
+        "total": "numeric(12,2)",
+        "payment_type": "int (1=efectivo, 2=tarjeta, 3=mixto, 4=plataforma, 5=transferencia)",
+        "tip": "numeric(12,2) DEFAULT 0",
+        "tip_percent": "numeric(5,2) NULL",
+        "platform": "varchar(50) NULL (uber, didi, rappi)",
+        "shipping": "numeric(12,2) DEFAULT 0",
+        "shipping_type": "varchar(20) NULL",
+        "cash_received": "numeric(12,2) NULL",
+        "change_amount": "numeric(12,2) NULL",
+        "status": "varchar(20) DEFAULT 'completed' (completed|paid|order|cancelled|returned)",
+        "created_at": "timestamptz"
+      },
+      "joins": [
+        "JOIN sale_items si ON si.sale_id = sa.id",
+        "JOIN users u ON u.id = sa.user_id",
+        "JOIN payments pay ON pay.sale_id = sa.id",
+        "JOIN customers cu ON cu.id = sa.customer_id"
+      ],
+      "notes": "Para pagos mixtos, payments tiene un registro por método. Usa SUM(pay.amount) agrupado por pay.method para desglose."
+    },
+    "sale_items": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "sale_id": "uuid FK sales.id",
+        "product_id": "uuid FK products.id NULL",
+        "variant_id": "uuid FK product_variants.id NULL",
+        "combo_id": "uuid FK combos.id NULL",
+        "name": "varchar(300) (nombre del producto al momento de la venta)",
+        "quantity": "int",
+        "unit_price": "numeric(12,2)",
+        "total_price": "numeric(12,2)",
+        "discount": "numeric(12,2) DEFAULT 0",
+        "tax": "numeric(12,2) DEFAULT 0",
+        "tax_rate": "numeric(5,2) NULL"
+      },
+      "joins": [
+        "JOIN products p ON p.id = si.product_id"
+      ]
+    },
+    "payments": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "sale_id": "uuid FK sales.id",
+        "method": "varchar(50) (cash|card|transfer|platform)",
+        "amount": "numeric(12,2)",
+        "reference": "varchar(200) NULL",
+        "platform": "varchar(50) NULL (uber, didi, rappi)",
+        "created_at": "timestamptz"
+      },
+      "notes": "Una venta puede tener múltiples pagos (pago mixto). Cada método es un registro separado."
+    },
+    "products": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "category_id": "uuid FK categories.id NULL",
+        "subcategory_id": "uuid FK subcategories.id NULL",
+        "brand_id": "uuid FK brands.id NULL",
+        "name": "varchar(300)",
+        "description": "text NULL",
+        "sku": "varchar(100) NULL",
+        "barcode": "varchar(100) NULL",
+        "base_price": "numeric(12,2) (precio de venta)",
+        "cost_price": "numeric(12,2) NULL (costo de compra/producción)",
+        "tax_rate": "numeric(5,2) NULL",
+        "stock": "numeric(12,2) DEFAULT 0 (inventario actual)",
+        "min_stock": "numeric(12,2) DEFAULT 0 (stock mínimo/alerta)",
+        "max_stock": "numeric(12,2) NULL",
+        "has_variants": "boolean DEFAULT false",
+        "has_supplies": "boolean DEFAULT false (tiene receta/insumos)",
+        "is_active": "boolean DEFAULT true",
+        "is_favorite": "boolean DEFAULT false",
+        "sort_order": "int DEFAULT 0",
+        "created_at": "timestamptz"
+      },
+      "joins": [
+        "JOIN categories c ON c.id = p.category_id",
+        "JOIN subcategories sc ON sc.id = p.subcategory_id",
+        "JOIN brands b ON b.id = p.brand_id"
+      ],
+      "notes": "Si has_variants=true, el stock está en product_variants, no en products.stock"
+    },
+    "product_variants": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "product_id": "uuid FK products.id",
+        "variant_option_id": "uuid FK variant_options.id",
+        "sku": "varchar(100) NULL",
+        "barcode": "varchar(100) NULL",
+        "price": "numeric(12,2) (precio de esta variante)",
+        "cost_price": "numeric(12,2) NULL",
+        "stock": "numeric(12,2) DEFAULT 0",
+        "min_stock": "numeric(12,2) DEFAULT 0",
+        "is_active": "boolean DEFAULT true"
+      },
+      "joins": [
+        "JOIN variant_options vo ON vo.id = pv.variant_option_id",
+        "JOIN products p ON p.id = pv.product_id"
+      ],
+      "notes": "Cada variante tiene su propio precio y stock. Ej: Café Chico $30, Café Grande $45"
+    },
+    "variant_options": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "variant_group_id": "uuid FK variant_groups.id",
+        "name": "varchar(100) (ej: Chico, Mediano, Grande)",
+        "sort_order": "int DEFAULT 0"
+      }
+    },
+    "variant_groups": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(100) (ej: Tamaño, Color)"
+      }
+    },
+    "categories": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "brand_id": "uuid FK brands.id NULL",
+        "name": "varchar(200)",
+        "description": "text NULL",
+        "is_active": "boolean DEFAULT true",
+        "sort_order": "int DEFAULT 0"
+      }
+    },
+    "subcategories": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "category_id": "uuid FK categories.id",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(200)",
+        "is_active": "boolean DEFAULT true",
+        "sort_order": "int DEFAULT 0"
+      }
+    },
+    "brands": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(200)",
+        "is_active": "boolean DEFAULT true"
+      }
+    },
+    "users": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "username": "varchar(100) UNIQUE",
+        "email": "varchar(255) NULL",
+        "phone": "varchar(20) NULL",
+        "person_id": "uuid FK persons.id NULL",
+        "default_store_id": "uuid FK stores.id NULL",
+        "is_active": "boolean DEFAULT true",
+        "is_owner": "boolean DEFAULT false",
+        "created_at": "timestamptz"
+      },
+      "joins": [
+        "JOIN persons pe ON pe.id = u.person_id"
+      ],
+      "notes": "Cajeros/empleados se identifican por JOIN users→persons para nombre completo (pe.first_name, pe.last_name)"
+    },
+    "persons": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "first_name": "varchar(100)",
+        "last_name": "varchar(100)",
+        "maternal_last_name": "varchar(100) NULL",
+        "email": "varchar(255) NULL",
+        "gender": "varchar(10) NULL (masculino|femenino|otro)",
+        "birthdate": "date NULL",
+        "created_at": "timestamptz"
+      }
+    },
+    "person_phones": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "person_id": "uuid FK persons.id",
+        "country_code": "varchar(5)",
+        "number": "varchar(20)",
+        "is_primary": "boolean DEFAULT false"
+      }
+    },
+    "stores": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "owner_id": "uuid FK users.id",
+        "name": "varchar(200)",
+        "business_type_id": "int FK business_types.id NULL",
+        "tax_rate": "numeric(5,2) NULL",
+        "is_active": "boolean DEFAULT true",
+        "created_at": "timestamptz"
+      }
+    },
+    "customers": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(200) (nombre del cliente)",
+        "last_name": "varchar(200) NULL",
+        "email": "varchar(255) NULL",
+        "phone": "varchar(20) NULL",
+        "gender": "varchar(20) NULL",
+        "birth_date": "date NULL",
+        "visit_count": "int DEFAULT 0 (número de visitas/compras)",
+        "is_active": "boolean DEFAULT true",
+        "created_at": "timestamptz"
+      },
+      "joins": [
+        "JOIN sales sa ON sa.customer_id = cu.id"
+      ],
+      "notes": "Los datos del cliente están directamente en esta tabla (NO en persons). Para obtener ventas de un cliente: JOIN sales ON sales.customer_id = customers.id"
+    },
+    "employees": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "user_id": "uuid FK users.id NULL",
+        "person_id": "uuid FK persons.id NULL",
+        "name": "varchar(200) (nombre completo del empleado)",
+        "position": "varchar(100) NULL (cajero, mesero, etc.)",
+        "salary": "numeric(12,2) NULL",
+        "is_active": "boolean DEFAULT true",
+        "created_at": "timestamptz"
+      }
+    },
+    "supplies": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(200)",
+        "unit": "varchar(20) (kg, g, lt, ml, pz)",
+        "unit_type": "varchar(20) (weight|volume|piece)",
+        "current_stock": "numeric(12,2) DEFAULT 0",
+        "min_stock": "numeric(12,2) DEFAULT 0",
+        "max_stock": "numeric(12,2) NULL",
+        "cost_per_unit": "numeric(12,4) DEFAULT 0 (costo por unidad base: por kg, por lt, por pz)",
+        "description": "text NULL",
+        "is_perishable": "boolean DEFAULT false",
+        "is_active": "boolean DEFAULT true"
+      }
+    },
+    "product_supplies": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "product_id": "uuid FK products.id",
+        "supply_id": "uuid FK supplies.id",
+        "quantity": "numeric(12,4) (cantidad usada por producto)",
+        "unit": "varchar(20) NULL (unidad de la receta: g, ml, etc.)",
+        "quantity_in_base": "numeric(12,6) NULL (cantidad convertida a unidad base)",
+        "cost_per_product": "numeric(12,4) NULL (costo calculado de este insumo por producto)",
+        "is_optional": "boolean DEFAULT false",
+        "is_default": "boolean DEFAULT true"
+      },
+      "joins": [
+        "JOIN supplies s ON s.id = ps.supply_id",
+        "JOIN products p ON p.id = ps.product_id"
+      ],
+      "notes": "Receta/ingredientes de un producto. cost_per_product = quantity_in_base × supply.cost_per_unit"
+    },
+    "combos": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "name": "varchar(200)",
+        "description": "text NULL",
+        "price": "numeric(12,2)",
+        "is_active": "boolean DEFAULT true"
+      }
+    },
+    "checkout_deposits": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "user_id": "uuid FK users.id NULL",
+        "amount": "numeric(12,2)",
+        "description": "text NULL",
+        "created_at": "timestamptz"
+      },
+      "notes": "Depósitos de efectivo a la caja"
+    },
+    "checkout_expenses": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "user_id": "uuid FK users.id NULL",
+        "description": "text",
+        "amount": "numeric(12,2)",
+        "category": "varchar(100) NULL",
+        "created_at": "timestamptz"
+      }
+    },
+    "checkout_withdrawals": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "user_id": "uuid FK users.id NULL",
+        "amount": "numeric(12,2)",
+        "reason": "text NULL",
+        "created_at": "timestamptz"
+      }
+    },
+    "checkout_cuts": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "user_id": "uuid FK users.id NULL",
+        "cut_type": "varchar(20) DEFAULT 'partial' (partial|full)",
+        "total_sales": "numeric(12,2) DEFAULT 0",
+        "total_expenses": "numeric(12,2) DEFAULT 0",
+        "total_withdrawals": "numeric(12,2) DEFAULT 0",
+        "cash_expected": "numeric(12,2) DEFAULT 0",
+        "cash_actual": "numeric(12,2) NULL",
+        "difference": "numeric(12,2) NULL (cash_actual - cash_expected)",
+        "summary": "jsonb NULL (desglose detallado)",
+        "created_at": "timestamptz"
+      }
+    },
+    "sale_returns": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "store_id": "uuid FK stores.id",
+        "sale_id": "uuid FK sales.id",
+        "user_id": "uuid FK users.id NULL",
+        "return_number": "varchar(50)",
+        "total_refund": "numeric(12,2)",
+        "refund_method": "varchar(20) NULL (cash|card|transfer)",
+        "reason": "varchar(50) NULL",
+        "reason_detail": "text NULL",
+        "status": "varchar(20) DEFAULT 'completed'",
+        "created_at": "timestamptz"
+      },
+      "joins": [
+        "JOIN sales sa ON sa.id = sr.sale_id",
+        "JOIN sale_return_items sri ON sri.return_id = sr.id"
+      ],
+      "notes": "Devoluciones/cancelaciones de ventas"
+    },
+    "sale_return_items": {
+      "pk": ["id"],
+      "columns": {
+        "id": "uuid",
+        "return_id": "uuid FK sale_returns.id",
+        "sale_item_id": "uuid FK sale_items.id",
+        "product_id": "uuid NULL",
+        "variant_id": "uuid NULL",
+        "name": "varchar(300)",
+        "quantity": "int",
+        "unit_price": "numeric(12,2)",
+        "total_price": "numeric(12,2)",
+        "returned_to_inventory": "boolean DEFAULT false"
+      }
+    }
+  },
+  "synonyms": {
+    "ventas": ["sales"],
+    "productos": ["products", "sale_items"],
+    "variantes": ["product_variants", "variant_options"],
+    "clientes": ["customers"],
+    "empleados": ["employees", "users"],
+    "cajeros": ["users"],
+    "gastos": ["checkout_expenses"],
+    "retiros": ["checkout_withdrawals"],
+    "cortes": ["checkout_cuts"],
+    "depositos": ["checkout_deposits"],
+    "insumos": ["supplies", "product_supplies"],
+    "recetas": ["product_supplies"],
+    "ingredientes": ["product_supplies", "supplies"],
+    "devoluciones": ["sale_returns", "sale_return_items"],
+    "categorias": ["categories"],
+    "subcategorias": ["subcategories"],
+    "marcas": ["brands"],
+    "combos": ["combos"],
+    "propinas": ["sales (tip column)"],
+    "envios": ["sales (shipping column)"]
+  }
+}

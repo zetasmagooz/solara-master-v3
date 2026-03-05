@@ -1,0 +1,22 @@
+-- Migración: Agregar columnas de checkout a sales, sale_items y payments
+-- Fecha: 2026-02-28
+
+-- Sales
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_type INTEGER DEFAULT 1;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS tip NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS tip_percent NUMERIC(5,2);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount_type VARCHAR(20);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS platform VARCHAR(50);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS cash_received NUMERIC(12,2);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS change_amount NUMERIC(12,2);
+
+-- Sale Items
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS combo_id UUID REFERENCES combos(id);
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS discount NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS tax NUMERIC(12,2) DEFAULT 0;
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS tax_rate NUMERIC(5,2);
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS modifiers_json JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS removed_supplies_json JSONB DEFAULT '[]'::jsonb;
+
+-- Payments
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS platform VARCHAR(50);

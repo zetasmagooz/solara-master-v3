@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploads (runtime data)
+uploads/*
+!uploads/.gitkeep
+
+# Models (large binary files)
+models/
+
+# Type checking / testing
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# RSA keys (sensitive)
+app/assets/keys/private_key.pem
+app/assets/keys/*.pem
