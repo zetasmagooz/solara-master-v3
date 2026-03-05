@@ -14,10 +14,12 @@
 - Formato: secciones por fecha, bullets por cambio
 
 ### Git / Commits
-- Hacer commits cuando se mete un feature o se resuelve un bug
+- **Toda mejora de backend se commitea y pushea en ESTE repo**
+- **Repo**: https://github.com/zetasmagooz/solara-master-v3.git (branch: master)
+- **Ruta local**: `/Users/manaurimaldonado/Desktop/solara-kyosk/solara-backend`
+- Si un feature toca también el frontend, hacer commit separado en el repo de la app
 - Formato: `tipo: descripción` (feat, fix, refactor, chore, docs, style, perf)
 - Siempre incluir `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
-- **Repo**: https://github.com/zetasmagooz/solara-master-v3.git (branch: master)
 
 ### Comunicación
 - **Idioma**: Español
