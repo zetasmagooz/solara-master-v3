@@ -10,6 +10,7 @@ PERMISSIONS = {
     "module:clientes": "Acceso a Clientes",
     "module:reportes": "Acceso a Reportes",
     "module:ajustes": "Acceso a Ajustes",
+    "module:plataformas": "Acceso a Plataformas",
     # Acciones específicas
     "ventas:cobrar": "Cobrar ventas",
     "ventas:cancelar": "Cancelar ventas",
@@ -18,6 +19,7 @@ PERMISSIONS = {
     "ordenes:cobrar": "Cobrar órdenes de restaurante",
     "inventarios:editar": "Editar productos/inventario",
     "usuarios:gestionar": "Gestionar usuarios y roles",
+    "plataformas:gestionar": "Gestionar órdenes de plataformas",
 }
 
 DEFAULT_ROLES = {
@@ -26,10 +28,12 @@ DEFAULT_ROLES = {
         "module:vender",
         "module:caja",
         "module:restaurantes",
+        "module:plataformas",
         "ventas:cobrar",
         "ordenes:cobrar",
         "ordenes:tomar",
         "ordenes:generar",
+        "plataformas:gestionar",
     ],
     "Mesero": [
         "module:restaurantes",
