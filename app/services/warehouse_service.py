@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from app.models.catalog import Brand, Category, Product, ProductImage, Subcategory
 from app.models.organization import Organization
 from app.models.store import Store
+from app.models.user import User
 from app.models.warehouse import (
     WarehouseEntry,
     WarehouseEntryItem,
@@ -624,11 +625,23 @@ class WarehouseService:
             entries_result = await self.db.execute(
                 select(WarehouseEntry)
                 .where(WarehouseEntry.warehouse_store_id == warehouse_store_id)
+                .options(
+                    selectinload(WarehouseEntry.items).selectinload(WarehouseEntryItem.product),
+                    selectinload(WarehouseEntry.creator).selectinload(User.person),
+                )
                 .order_by(WarehouseEntry.created_at.desc())
                 .limit(limit)
                 .offset(offset)
             )
             for entry in entries_result.scalars().all():
+                creator_name = None
+                if entry.creator and entry.creator.person:
+                    p = entry.creator.person
+                    creator_name = f"{p.first_name} {p.last_name}".strip()
+                products = [
+                    {"name": item.product.name if item.product else "Producto", "quantity": float(item.quantity)}
+                    for item in entry.items
+                ]
                 results.append({
                     "id": entry.id,
                     "type": "entry",
@@ -636,6 +649,8 @@ class WarehouseService:
                     "total_items": entry.total_items,
                     "target_store_name": None,
                     "supplier_name": entry.supplier_name,
+                    "created_by_name": creator_name,
+                    "products": products,
                     "created_at": entry.created_at,
                 })
 
@@ -644,13 +659,25 @@ class WarehouseService:
             transfers_result = await self.db.execute(
                 select(WarehouseTransfer)
                 .where(WarehouseTransfer.warehouse_store_id == warehouse_store_id)
-                .options(selectinload(WarehouseTransfer.target_store))
+                .options(
+                    selectinload(WarehouseTransfer.target_store),
+                    selectinload(WarehouseTransfer.items).selectinload(WarehouseTransferItem.product),
+                    selectinload(WarehouseTransfer.creator).selectinload(User.person),
+                )
                 .order_by(WarehouseTransfer.created_at.desc())
                 .limit(limit)
                 .offset(offset)
             )
             for transfer in transfers_result.scalars().all():
                 target_name = transfer.target_store.name if transfer.target_store else "tienda"
+                creator_name = None
+                if transfer.creator and transfer.creator.person:
+                    p = transfer.creator.person
+                    creator_name = f"{p.first_name} {p.last_name}".strip()
+                products = [
+                    {"name": item.product.name if item.product else "Producto", "quantity": float(item.quantity)}
+                    for item in transfer.items
+                ]
                 results.append({
                     "id": transfer.id,
                     "type": "transfer",
@@ -658,6 +685,8 @@ class WarehouseService:
                     "total_items": transfer.total_items,
                     "target_store_name": target_name,
                     "supplier_name": None,
+                    "created_by_name": creator_name,
+                    "products": products,
                     "created_at": transfer.created_at,
                 })
 

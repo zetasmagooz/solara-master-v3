@@ -80,6 +80,11 @@ class TransferResponse(BaseModel):
 
 # ── Bitácora ──
 
+class LogEntryProduct(BaseModel):
+    name: str
+    quantity: float
+
+
 class LogEntry(BaseModel):
     id: UUID
     type: str  # "entry" | "transfer"
@@ -87,6 +92,8 @@ class LogEntry(BaseModel):
     total_items: int
     target_store_name: str | None = None
     supplier_name: str | None = None
+    created_by_name: str | None = None
+    products: list[LogEntryProduct] = []
     created_at: datetime
 
 
