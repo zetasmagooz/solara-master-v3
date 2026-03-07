@@ -41,6 +41,14 @@ class UserService:
         if existing.scalar_one_or_none():
             raise ValueError("El nombre de usuario ya existe")
 
+        # Verificar teléfono único entre usuarios
+        if phone:
+            phone_exists = await self.db.execute(
+                select(User).where(User.phone == phone, User.is_active.is_(True))
+            )
+            if phone_exists.scalar_one_or_none():
+                raise ValueError("El número de teléfono ya está registrado por otro usuario")
+
         # 1. Person
         person = Person(first_name=first_name, last_name=last_name, email=email)
         self.db.add(person)
@@ -152,6 +160,13 @@ class UserService:
             if user.person:
                 user.person.email = email
         if phone is not None:
+            # Verificar teléfono único entre usuarios (excluir el propio)
+            if phone:
+                phone_exists = await self.db.execute(
+                    select(User).where(User.phone == phone, User.id != user_id, User.is_active.is_(True))
+                )
+                if phone_exists.scalar_one_or_none():
+                    raise ValueError("El número de teléfono ya está registrado por otro usuario")
             user.phone = phone
         if is_active is not None:
             user.is_active = is_active

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1 import ai, auth, catalog, checkout, combos, customers, kiosk, modifiers, orders, platform_orders, restaurant, returns, roles, sales, stores, supplies, sync, users, variants
+from app.api.v1 import ai, auth, catalog, checkout, combos, customers, kiosk, modifiers, orders, organizations, platform_orders, reports, restaurant, returns, roles, sales, stores, subscriptions, supplies, sync, users, variants, warehouse
 
 api_router = APIRouter()
 
@@ -21,5 +21,9 @@ api_router.include_router(customers.router)
 api_router.include_router(kiosk.router)
 api_router.include_router(sync.router)
 api_router.include_router(restaurant.router)
+api_router.include_router(organizations.router)
 api_router.include_router(platform_orders.router)
+api_router.include_router(reports.router)
 api_router.include_router(ai.router)
+api_router.include_router(warehouse.router)
+api_router.include_router(subscriptions.router)

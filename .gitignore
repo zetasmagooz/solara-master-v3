@@ -36,8 +36,8 @@ logs/
 uploads/*
 !uploads/.gitkeep
 
-# Models (large binary files)
-models/
+# Models (large binary ML files, not app/models/)
+/models/
 
 # Type checking / testing
 .mypy_cache/

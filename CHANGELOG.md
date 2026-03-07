@@ -1,5 +1,32 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-03-07
+
+### feat: Módulo de Suscripciones/Planes
+- Tablas `plans` y `organization_subscriptions` (migración Alembic)
+- Modelo Plan (slug, name, price_monthly, features JSONB) + OrganizationSubscription (status: trial|active|cancelled|expired)
+- 4 planes: Starter ($0), Basic ($399), Premium ($699), Ultimate ($999)
+- Features JSONB: ai_queries_per_day, sales_per_day, max_products, max_users, max_stores, modules, reports, support, payments
+- Endpoints: GET /subscriptions/plans (público), GET /subscriptions/current (auth), POST /subscriptions/activate (owner)
+- Auto-expire: trials vencidos se downgradan automáticamente a Starter
+- Registro: nuevos usuarios reciben trial Ultimate por 30 días
+- Seed idempotente: `python -m app.seeds.seed_plans`
+
+## 2026-03-06
+
+### feat: Defaults de organización para nuevas tiendas
+- Migración SQL: 5 columnas nuevas en `organizations` (default_tax_rate, default_tax_included, default_sales_without_stock, default_country_id, default_currency_id)
+- Modelo Organization actualizado con campos defaults
+- Schemas: OrgDefaultsResponse, OrgDefaultsUpdate
+- Endpoints: GET/PATCH `/organizations/{org_id}/defaults`
+- Herencia automática: al crear tienda, Store y StoreConfig heredan defaults de la org
+
+### feat: Owner GPS auto-login (auto-detección de tienda)
+- `geo.py`: Constante OWNER_AUTO_DETECT_RADIUS_METERS=500, función find_nearest_store()
+- `auth_service.py`: authenticate() ahora retorna (user, auto_detected_store_name), auto-detecta tienda más cercana para owners con GPS
+- `TokenResponse` incluye campo `auto_detected_store` opcional
+- Endpoint login propaga nombre de tienda auto-detectada
+
 ## 2026-03-04
 
 ### feat: Gemini Streaming TTS con Pipeline de Dos Bloques

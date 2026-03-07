@@ -18,6 +18,18 @@ class CustomerService:
         self.db = db
 
     async def create_customer(self, store_id: UUID, data: CustomerCreate | CustomerQuickCreate) -> Customer:
+        # Verificar teléfono único entre clientes del mismo store
+        if data.phone:
+            phone_exists = await self.db.execute(
+                select(Customer).where(
+                    Customer.store_id == store_id,
+                    Customer.phone == data.phone,
+                    Customer.is_active.is_(True),
+                )
+            )
+            if phone_exists.scalar_one_or_none():
+                raise ValueError("El número de teléfono ya está registrado por otro cliente")
+
         customer = Customer(
             store_id=store_id,
             name=data.name,
@@ -92,6 +104,20 @@ class CustomerService:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
+
+        # Verificar teléfono único entre clientes del mismo store (excluir el propio)
+        if "phone" in update_data and update_data["phone"]:
+            phone_exists = await self.db.execute(
+                select(Customer).where(
+                    Customer.store_id == customer.store_id,
+                    Customer.phone == update_data["phone"],
+                    Customer.id != customer_id,
+                    Customer.is_active.is_(True),
+                )
+            )
+            if phone_exists.scalar_one_or_none():
+                raise ValueError("El número de teléfono ya está registrado por otro cliente")
+
         for field, value in update_data.items():
             setattr(customer, field, value)
 

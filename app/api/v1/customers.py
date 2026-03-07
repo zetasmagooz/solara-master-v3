@@ -42,7 +42,10 @@ async def create_customer(
     _: Annotated[User, Depends(get_current_user)],
 ):
     service = CustomerService(db)
-    return await service.create_customer(store_id, data)
+    try:
+        return await service.create_customer(store_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/quick", response_model=CustomerResponse)
@@ -53,7 +56,10 @@ async def quick_create_customer(
     _: Annotated[User, Depends(get_current_user)],
 ):
     service = CustomerService(db)
-    return await service.create_customer(store_id, data)
+    try:
+        return await service.create_customer(store_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
@@ -90,7 +96,10 @@ async def update_customer(
     _: Annotated[User, Depends(get_current_user)],
 ):
     service = CustomerService(db)
-    customer = await service.update_customer(customer_id, data)
+    try:
+        customer = await service.update_customer(customer_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not customer:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return customer

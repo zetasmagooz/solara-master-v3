@@ -51,6 +51,18 @@ async def get_current_user(
     return user
 
 
+async def require_owner(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Dependency que verifica que el usuario sea owner."""
+    if not current_user.is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el propietario puede realizar esta acción",
+        )
+    return current_user
+
+
 def require_permission(*perms: str):
     """Dependency que verifica que el usuario tenga los permisos requeridos."""
 

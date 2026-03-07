@@ -9,6 +9,9 @@ class LoginRequest(BaseModel):
     email: EmailStr | None = None
     phone: str | None = None
     password: str
+    latitude: float | None = None
+    longitude: float | None = None
+    device_info: str | None = None
 
 
 # --- Registro completo (multi-paso) ---
@@ -35,6 +38,9 @@ class RegisterStoreData(BaseModel):
     municipality: str | None = None
     state: str | None = None
     zip_code: str | None = None
+    # Geolocalización
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class RegisterRequest(BaseModel):
@@ -49,6 +55,8 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     trial_ends_at: str | None = None
+    auto_detected_store: str | None = None
+    subscription_created: bool | None = None
 
 
 class RefreshTokenRequest(BaseModel):

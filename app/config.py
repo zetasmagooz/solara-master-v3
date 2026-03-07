@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     JWT_PUBLIC_KEY_PATH: str = "app/assets/keys/public_key_local.pem"
     JWT_ALGORITHM: str = "RS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 90
     # Fallback HS256 legacy (solo para verificar tokens viejos durante migración)
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
