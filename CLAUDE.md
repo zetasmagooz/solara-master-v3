@@ -21,6 +21,15 @@
 - Formato: `tipo: descripción` (feat, fix, refactor, chore, docs, style, perf)
 - Siempre incluir `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
 
+### Git / Pull antes de trabajar (OBLIGATORIO)
+- **SIEMPRE hacer `git pull` antes de iniciar cualquier cambio**
+- Si el pull detecta conflictos:
+  1. **NO resolver ni hacer merge automáticamente** — PARAR inmediatamente
+  2. Mostrar el diff completo de los conflictos (`git diff`)
+  3. Detallar las diferencias entre la rama local y la remota (qué cambió en cada lado)
+  4. Notificar al usuario y **esperar instrucciones explícitas** antes de hacer merge o resolver
+- Si no hay conflictos, continuar normalmente
+
 ### Comunicación
 - **Idioma**: Español
 - **Contexto al 85%**: Hacer compact o clear
