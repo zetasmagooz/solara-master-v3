@@ -161,12 +161,14 @@ class AuthService:
                 auto_detected_store = nearest.name
 
         # Validar geolocalización para empleados (no-owners)
+        # Solo validar si: el empleado envió coords Y la tienda tiene coords configuradas
         if not user.is_owner and data.latitude is not None and data.longitude is not None:
             if user.default_store_id:
                 store_result = await self.db.execute(
                     select(Store).where(Store.id == user.default_store_id)
                 )
                 store = store_result.scalar_one_or_none()
+                # Si la tienda NO tiene geo, dejar pasar sin validar
                 if store and store.latitude is not None and store.longitude is not None:
                     dist = haversine_distance(
                         float(data.latitude), float(data.longitude),
@@ -175,6 +177,8 @@ class AuthService:
                     if dist > STORE_RADIUS_METERS:
                         raise ValueError("LOCATION_OUT_OF_RANGE")
 
+        # Si el empleado NO envió coords (GPS apagado/sin permiso), dejar pasar
+        # La tienda decidirá si requiere geo en su configuración
         return user, auto_detected_store
 
     async def create_tokens(self, user: User, trial_ends_at: datetime | None = None) -> dict:
