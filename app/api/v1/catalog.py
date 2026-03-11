@@ -388,9 +388,9 @@ async def generate_product_image_endpoint(
 
     import base64 as b64mod
     base64_data = f"data:image/jpeg;base64,{b64mod.b64encode(jpeg_bytes).decode()}"
-    is_primary = len(product.images) == 0
+    # Always set as primary — frontend deletes old images before generating
     host_url = str(request.base_url).rstrip("/")
-    return await service.save_product_image(product_id, base64_data, is_primary, host_url)
+    return await service.save_product_image(product_id, base64_data, True, host_url)
 
 
 @router.delete("/product-images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
