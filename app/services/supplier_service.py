@@ -78,8 +78,18 @@ class SupplierService:
         self.db.add(supplier)
         await self.db.flush()
 
+        # Para proveedor nuevo, agregar brands directamente (no usar _sync_brands
+        # que intenta iterar supplier.brands sin eager loading)
         if data.brands:
-            await self._sync_brands(supplier, data.brands)
+            for b in data.brands:
+                sb = SupplierBrand(
+                    supplier_id=supplier.id,
+                    brand_id=uuid.UUID(b.brand_id),
+                    is_primary=b.is_primary,
+                    notes=b.notes,
+                )
+                self.db.add(sb)
+            await self.db.flush()
 
         # Reload with brands
         return await self.get_by_id(supplier.id)
