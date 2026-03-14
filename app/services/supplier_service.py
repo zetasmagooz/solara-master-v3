@@ -5,10 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Brand
+from app.models.store import Store
 from app.models.supplier import Supplier, SupplierBrand
 from app.schemas.supplier import (
     SupplierBrandResponse,
     SupplierCreate,
+    SupplierPropagateResponse,
     SupplierResponse,
     SupplierUpdate,
 )
@@ -189,6 +191,66 @@ class SupplierService:
             "per_page": per_page,
             "pages": math.ceil(total / per_page) if total else 0,
         }
+
+    async def create_with_propagation(
+        self,
+        store_id: uuid.UUID,
+        data: SupplierCreate,
+        target_store_ids: list[uuid.UUID],
+        organization_id: uuid.UUID,
+    ) -> SupplierPropagateResponse:
+        """Crear proveedor en warehouse y copiar a tiendas seleccionadas."""
+        # Validar que los target stores pertenecen a la org y no son warehouse
+        result = await self.db.execute(
+            select(Store).where(
+                Store.id.in_(target_store_ids),
+                Store.organization_id == organization_id,
+                Store.is_warehouse.is_(False),
+                Store.is_active.is_(True),
+            )
+        )
+        valid_stores = {s.id for s in result.scalars().all()}
+
+        # Crear proveedor principal en warehouse
+        main_supplier = await self.create(store_id, data)
+
+        # Copiar a cada tienda válida
+        propagated_ids: list[str] = []
+        for sid in target_store_ids:
+            if sid not in valid_stores:
+                continue
+            copy = Supplier(
+                store_id=sid,
+                name=data.name,
+                company=data.company,
+                contact_name=data.contact_name,
+                phone=data.phone,
+                email=data.email,
+                tax_id=data.tax_id,
+                address=data.address,
+                notes=data.notes,
+            )
+            self.db.add(copy)
+            await self.db.flush()
+
+            if data.brands:
+                for b in data.brands:
+                    sb = SupplierBrand(
+                        supplier_id=copy.id,
+                        brand_id=uuid.UUID(b.brand_id),
+                        is_primary=b.is_primary,
+                        notes=b.notes,
+                    )
+                    self.db.add(sb)
+                await self.db.flush()
+
+            propagated_ids.append(str(sid))
+
+        return SupplierPropagateResponse(
+            supplier=main_supplier,
+            propagated_count=len(propagated_ids),
+            propagated_store_ids=propagated_ids,
+        )
 
     async def get_by_brand(self, store_id: uuid.UUID, brand_id: uuid.UUID) -> list[SupplierResponse]:
         result = await self.db.execute(

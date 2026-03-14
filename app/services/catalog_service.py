@@ -487,10 +487,21 @@ class CatalogService:
         return True
 
     # --- Supplies ---
+    def _supply_to_response(self, s: Supply) -> dict:
+        """Convierte Supply ORM a dict compatible con SupplyResponse."""
+        d = {c.key: getattr(s, c.key) for c in s.__table__.columns}
+        d["category_name"] = s.category.name if s.category else None
+        d["brand_name"] = s.brand.name if s.brand else None
+        return d
+
     async def get_supplies(self, store_id: UUID):
-        stmt = select(Supply).where(Supply.store_id == store_id, Supply.is_active.is_(True))
+        stmt = (
+            select(Supply)
+            .where(Supply.store_id == store_id, Supply.is_active.is_(True))
+            .options(selectinload(Supply.category), selectinload(Supply.brand))
+        )
         result = await self.db.execute(stmt)
-        return result.scalars().all()
+        return [self._supply_to_response(s) for s in result.scalars().all()]
 
     async def create_supply(self, store_id: UUID, **kwargs) -> Supply:
         unit_type = kwargs.get("unit_type")
@@ -503,7 +514,13 @@ class CatalogService:
         supply = Supply(store_id=store_id, **kwargs)
         self.db.add(supply)
         await self.db.flush()
-        return supply
+        # Recargar con relaciones
+        result = await self.db.execute(
+            select(Supply)
+            .where(Supply.id == supply.id)
+            .options(selectinload(Supply.category), selectinload(Supply.brand))
+        )
+        return self._supply_to_response(result.scalar_one())
 
     async def create_product_supply(self, product_id: UUID, **kwargs) -> ProductSupply:
         # Calcular conversión si el supply tiene unit_type
@@ -512,7 +529,7 @@ class CatalogService:
         quantity = kwargs.get("quantity", 0)
 
         if supply_id:
-            supply = await self.get_supply(supply_id)
+            supply = await self.get_supply_raw(supply_id)
             if supply and supply.unit_type and unit:
                 kwargs["quantity_in_base"] = convert_to_base(quantity, supply.unit_type, unit)
                 kwargs["cost_per_product"] = calculate_cost(
@@ -536,10 +553,20 @@ class CatalogService:
         return result.scalar_one()
 
     async def get_supply(self, supply_id: UUID):
+        result = await self.db.execute(
+            select(Supply)
+            .where(Supply.id == supply_id)
+            .options(selectinload(Supply.category), selectinload(Supply.brand))
+        )
+        s = result.scalar_one_or_none()
+        return self._supply_to_response(s) if s else None
+
+    async def get_supply_raw(self, supply_id: UUID) -> Supply | None:
+        """Obtiene el ORM Supply sin convertir (para uso interno)."""
         result = await self.db.execute(select(Supply).where(Supply.id == supply_id))
         return result.scalar_one_or_none()
 
-    async def update_supply(self, supply_id: UUID, **kwargs) -> Supply | None:
+    async def update_supply(self, supply_id: UUID, **kwargs) -> dict | None:
         result = await self.db.execute(select(Supply).where(Supply.id == supply_id))
         supply = result.scalar_one_or_none()
         if not supply:
@@ -575,7 +602,13 @@ class CatalogService:
                     )
             await self.db.flush()
 
-        return supply
+        # Recargar con relaciones
+        result = await self.db.execute(
+            select(Supply)
+            .where(Supply.id == supply_id)
+            .options(selectinload(Supply.category), selectinload(Supply.brand))
+        )
+        return self._supply_to_response(result.scalar_one())
 
     async def delete_supply(self, supply_id: UUID) -> bool:
         result = await self.db.execute(select(Supply).where(Supply.id == supply_id))

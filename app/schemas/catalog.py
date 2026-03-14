@@ -344,6 +344,8 @@ class ProductVariantResponse(BaseModel):
 # --- Supplies ---
 class SupplyCreate(BaseModel):
     name: str
+    category_id: UUID | None = None
+    brand_id: UUID | None = None
     unit: str | None = None
     unit_type: str | None = None
     cost_per_unit: float = 0
@@ -358,6 +360,8 @@ class SupplyCreate(BaseModel):
 
 class SupplyUpdate(BaseModel):
     name: str | None = None
+    category_id: UUID | None = None
+    brand_id: UUID | None = None
     unit: str | None = None
     unit_type: str | None = None
     cost_per_unit: float | None = None
@@ -374,6 +378,10 @@ class SupplyUpdate(BaseModel):
 class SupplyResponse(BaseModel):
     id: UUID
     store_id: UUID
+    category_id: UUID | None = None
+    brand_id: UUID | None = None
+    category_name: str | None = None
+    brand_name: str | None = None
     name: str
     unit: str | None = None
     unit_type: str | None = None

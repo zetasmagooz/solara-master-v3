@@ -30,6 +30,7 @@ class SupplierCreate(BaseModel):
     address: str | None = None
     notes: str | None = None
     brands: list[SupplierBrandCreate] = []
+    propagate_to_stores: list[str] | None = None  # store_ids para copiar
 
 
 class SupplierUpdate(BaseModel):
@@ -60,3 +61,9 @@ class SupplierResponse(BaseModel):
     brands: list[SupplierBrandResponse] = []
     created_at: str
     updated_at: str
+
+
+class SupplierPropagateResponse(BaseModel):
+    supplier: SupplierResponse
+    propagated_count: int = 0
+    propagated_store_ids: list[str] = []

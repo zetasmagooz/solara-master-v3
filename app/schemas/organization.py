@@ -39,6 +39,7 @@ class OrganizationStoreResponse(BaseModel):
     state: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    is_warehouse: bool = False
     is_active: bool
     created_at: datetime
 

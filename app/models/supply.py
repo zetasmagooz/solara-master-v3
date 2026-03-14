@@ -13,6 +13,8 @@ class Supply(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("categories.id"))
+    brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("brands.id"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     unit: Mapped[str | None] = mapped_column(String(20))
     unit_type: Mapped[str | None] = mapped_column(String(20))  # "weight" | "volume" | "piece"
@@ -27,6 +29,9 @@ class Supply(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    category = relationship("Category")
+    brand = relationship("Brand")
 
 
 class ProductSupply(Base):
