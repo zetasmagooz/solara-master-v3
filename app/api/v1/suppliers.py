@@ -1,11 +1,13 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
+from app.models.store import Store
 from app.models.user import User
-from app.schemas.supplier import SupplierCreate, SupplierResponse, SupplierUpdate
+from app.schemas.supplier import SupplierCreate, SupplierPropagateResponse, SupplierResponse, SupplierUpdate
 from app.services.supplier_service import SupplierService
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
@@ -46,6 +48,35 @@ async def create_supplier(
 
     service = SupplierService(db)
     return await service.create(store_id=current_user.default_store_id, data=data)
+
+
+@router.post("/propagate", response_model=SupplierPropagateResponse, status_code=status.HTTP_201_CREATED)
+async def create_supplier_with_propagation(
+    data: SupplierCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    # Validar que el usuario está en un warehouse
+    result = await db.execute(
+        select(Store).where(Store.id == current_user.default_store_id)
+    )
+    store = result.scalar_one_or_none()
+    if not store or not store.is_warehouse:
+        raise HTTPException(status_code=403, detail="Solo disponible desde el almacén")
+
+    if not data.propagate_to_stores:
+        raise HTTPException(status_code=400, detail="Debe especificar al menos una tienda destino")
+
+    service = SupplierService(db)
+    return await service.create_with_propagation(
+        store_id=current_user.default_store_id,
+        data=data,
+        target_store_ids=[UUID(sid) for sid in data.propagate_to_stores],
+        organization_id=store.organization_id,
+    )
 
 
 @router.get("/by-brand/{brand_id}")
