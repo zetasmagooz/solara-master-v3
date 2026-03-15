@@ -62,6 +62,17 @@ async def list_payment_methods(
     return await service.list_payment_methods(current_user.organization_id)
 
 
+@router.post("/sync-payment-methods", response_model=list[PaymentMethodResponse])
+async def sync_payment_methods(
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Sincroniza payment methods desde Stripe tras agregar tarjeta."""
+    _require_org(current_user)
+    service = StripeBillingService(db)
+    return await service.sync_payment_methods(current_user.organization_id)
+
+
 @router.post("/payment-methods/default")
 async def set_default_payment_method(
     data: SetPaymentMethodDefaultRequest,

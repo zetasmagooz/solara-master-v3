@@ -22,6 +22,7 @@ from app.models.platform_order import PlatformOrder, PlatformOrderStatusLog
 from app.models.warehouse import WarehouseEntry, WarehouseEntryItem, WarehouseTransfer, WarehouseTransferItem
 from app.models.subscription import Plan, OrganizationSubscription
 from app.models.stripe import StripeCustomer, StripePaymentMethod, StripeSubscription, StripeInvoice
+from app.models.backoffice import BowUser, BowSession, BowBlockLog, BowPlanPriceHistory, BowAuditLog, BowCommissionConfig, AiUsageDaily
 
 __all__ = [
     "Person", "User", "Password", "PersonPhone", "Role", "UserRolePermission",
@@ -48,4 +49,5 @@ __all__ = [
     "WarehouseEntry", "WarehouseEntryItem", "WarehouseTransfer", "WarehouseTransferItem",
     "Plan", "OrganizationSubscription",
     "StripeCustomer", "StripePaymentMethod", "StripeSubscription", "StripeInvoice",
+    "BowUser", "BowSession", "BowBlockLog", "BowPlanPriceHistory", "BowAuditLog", "BowCommissionConfig", "AiUsageDaily",
 ]

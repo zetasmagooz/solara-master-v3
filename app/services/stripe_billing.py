@@ -125,6 +125,41 @@ class StripeBillingService:
 
         return pm
 
+    async def sync_payment_methods(self, organization_id: uuid.UUID) -> list[StripePaymentMethod]:
+        """Sincroniza payment methods desde Stripe a la DB local."""
+        _require_stripe_keys()
+        sc = await self.get_or_create_customer(organization_id)
+
+        # Obtener PMs desde Stripe
+        stripe_pms = stripe.PaymentMethod.list(
+            customer=sc.stripe_customer_id,
+            type="card",
+        )
+
+        # Obtener el default PM del customer
+        customer = stripe.Customer.retrieve(sc.stripe_customer_id)
+        default_pm_id = customer.get("invoice_settings", {}).get("default_payment_method")
+
+        for spm in stripe_pms.data:
+            card = spm.get("card", {})
+            existing = await self.db.execute(
+                select(StripePaymentMethod).where(StripePaymentMethod.stripe_pm_id == spm.id)
+            )
+            if not existing.scalar_one_or_none():
+                pm = StripePaymentMethod(
+                    stripe_customer_id=sc.id,
+                    stripe_pm_id=spm.id,
+                    brand=card.get("brand", "unknown"),
+                    last_four=card.get("last4", "0000"),
+                    exp_month=card.get("exp_month", 0),
+                    exp_year=card.get("exp_year", 0),
+                    is_default=(spm.id == default_pm_id),
+                )
+                self.db.add(pm)
+
+        await self.db.flush()
+        return await self.list_payment_methods(organization_id)
+
     async def list_payment_methods(self, organization_id: uuid.UUID) -> list[StripePaymentMethod]:
         sc = await self.get_or_create_customer(organization_id)
         result = await self.db.execute(
