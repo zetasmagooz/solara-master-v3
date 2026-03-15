@@ -17,6 +17,7 @@ class Plan(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_monthly: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("0"))
     features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    stripe_price_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

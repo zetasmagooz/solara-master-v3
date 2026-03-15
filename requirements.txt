@@ -29,5 +29,8 @@ google-genai>=1.0.0
 # Image processing
 Pillow>=10.0.0
 
+# Payments
+stripe>=8.0.0
+
 # Sync DB engine (for AI memory manager)
 psycopg2-binary==2.9.10

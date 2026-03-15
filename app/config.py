@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     MAX_IMAGE_SIZE: int = 5_242_880  # 5MB
     ALLOWED_IMAGE_TYPES: list[str] = ["image/jpeg", "image/png", "image/webp"]
 
+    # Stripe
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+
     # DB Timezone
     DB_TIMEZONE: str = "America/Mexico_City"
 

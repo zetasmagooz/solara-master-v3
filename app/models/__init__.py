@@ -21,6 +21,7 @@ from app.models.restaurant import RestaurantTable, TableSession, TableSessionTab
 from app.models.platform_order import PlatformOrder, PlatformOrderStatusLog
 from app.models.warehouse import WarehouseEntry, WarehouseEntryItem, WarehouseTransfer, WarehouseTransferItem
 from app.models.subscription import Plan, OrganizationSubscription
+from app.models.stripe import StripeCustomer, StripePaymentMethod, StripeSubscription, StripeInvoice
 
 __all__ = [
     "Person", "User", "Password", "PersonPhone", "Role", "UserRolePermission",
@@ -46,4 +47,5 @@ __all__ = [
     "PlatformOrder", "PlatformOrderStatusLog",
     "WarehouseEntry", "WarehouseEntryItem", "WarehouseTransfer", "WarehouseTransferItem",
     "Plan", "OrganizationSubscription",
+    "StripeCustomer", "StripePaymentMethod", "StripeSubscription", "StripeInvoice",
 ]
