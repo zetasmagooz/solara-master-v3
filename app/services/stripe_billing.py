@@ -1,0 +1,405 @@
+import uuid
+from datetime import datetime, timezone
+
+import stripe
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.config import settings
+from app.models.organization import Organization
+from app.models.stripe import StripeCustomer, StripeInvoice, StripePaymentMethod, StripeSubscription
+from app.models.subscription import OrganizationSubscription, Plan
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+
+def _require_stripe_keys() -> None:
+    """Lanza error si las keys de Stripe no están configuradas."""
+    if not settings.STRIPE_SECRET_KEY:
+        raise ValueError(
+            "Stripe no está configurado. Agrega STRIPE_SECRET_KEY en el .env para habilitar el billing."
+        )
+
+
+class StripeBillingService:
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    # ─── Customer ────────────────────────────────────────────
+
+    async def get_or_create_customer(self, organization_id: uuid.UUID) -> StripeCustomer:
+        """Obtiene o crea un StripeCustomer para la organización."""
+        result = await self.db.execute(
+            select(StripeCustomer).where(StripeCustomer.organization_id == organization_id)
+        )
+        sc = result.scalar_one_or_none()
+        if sc:
+            return sc
+
+        # Obtener datos de la organización para crear el customer en Stripe
+        org_result = await self.db.execute(
+            select(Organization).where(Organization.id == organization_id)
+        )
+        org = org_result.scalar_one_or_none()
+        if not org:
+            raise ValueError("Organización no encontrada")
+
+        # Crear customer en Stripe
+        _require_stripe_keys()
+        customer = stripe.Customer.create(
+            name=org.name,
+            metadata={"organization_id": str(organization_id)},
+        )
+
+        sc = StripeCustomer(
+            organization_id=organization_id,
+            stripe_customer_id=customer.id,
+        )
+        self.db.add(sc)
+        await self.db.flush()
+        return sc
+
+    # ─── Payment Methods ─────────────────────────────────────
+
+    async def create_setup_intent(self, organization_id: uuid.UUID) -> dict:
+        """Crea un SetupIntent para tokenizar una tarjeta."""
+        _require_stripe_keys()
+        sc = await self.get_or_create_customer(organization_id)
+
+        intent = stripe.SetupIntent.create(
+            customer=sc.stripe_customer_id,
+            payment_method_types=["card"],
+        )
+
+        return {
+            "client_secret": intent.client_secret,
+            "stripe_customer_id": sc.stripe_customer_id,
+        }
+
+    async def save_payment_method(
+        self,
+        organization_id: uuid.UUID,
+        stripe_pm_id: str,
+        brand: str,
+        last_four: str,
+        exp_month: int,
+        exp_year: int,
+    ) -> StripePaymentMethod:
+        """Guarda un payment method confirmado (llamado tras SetupIntent success o webhook)."""
+        sc = await self.get_or_create_customer(organization_id)
+
+        # Verificar si ya existe
+        existing = await self.db.execute(
+            select(StripePaymentMethod).where(StripePaymentMethod.stripe_pm_id == stripe_pm_id)
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError("Este método de pago ya está registrado")
+
+        # Si es el primero, hacerlo default
+        count_result = await self.db.execute(
+            select(StripePaymentMethod).where(StripePaymentMethod.stripe_customer_id == sc.id)
+        )
+        is_first = len(count_result.scalars().all()) == 0
+
+        pm = StripePaymentMethod(
+            stripe_customer_id=sc.id,
+            stripe_pm_id=stripe_pm_id,
+            brand=brand,
+            last_four=last_four,
+            exp_month=exp_month,
+            exp_year=exp_year,
+            is_default=is_first,
+        )
+        self.db.add(pm)
+        await self.db.flush()
+
+        # Attach to Stripe customer y set como default si es el primero
+        _require_stripe_keys()
+        stripe.PaymentMethod.attach(stripe_pm_id, customer=sc.stripe_customer_id)
+        if is_first:
+            stripe.Customer.modify(
+                sc.stripe_customer_id,
+                invoice_settings={"default_payment_method": stripe_pm_id},
+            )
+
+        return pm
+
+    async def list_payment_methods(self, organization_id: uuid.UUID) -> list[StripePaymentMethod]:
+        sc = await self.get_or_create_customer(organization_id)
+        result = await self.db.execute(
+            select(StripePaymentMethod)
+            .where(StripePaymentMethod.stripe_customer_id == sc.id)
+            .order_by(StripePaymentMethod.is_default.desc(), StripePaymentMethod.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    async def set_default_payment_method(self, organization_id: uuid.UUID, pm_id: uuid.UUID) -> None:
+        sc = await self.get_or_create_customer(organization_id)
+
+        # Obtener el PM
+        result = await self.db.execute(
+            select(StripePaymentMethod).where(
+                StripePaymentMethod.id == pm_id,
+                StripePaymentMethod.stripe_customer_id == sc.id,
+            )
+        )
+        pm = result.scalar_one_or_none()
+        if not pm:
+            raise ValueError("Método de pago no encontrado")
+
+        # Quitar default de todos
+        await self.db.execute(
+            update(StripePaymentMethod)
+            .where(StripePaymentMethod.stripe_customer_id == sc.id)
+            .values(is_default=False)
+        )
+        pm.is_default = True
+
+        # Actualizar en Stripe
+        _require_stripe_keys()
+        stripe.Customer.modify(
+            sc.stripe_customer_id,
+            invoice_settings={"default_payment_method": pm.stripe_pm_id},
+        )
+        await self.db.flush()
+
+    async def delete_payment_method(self, organization_id: uuid.UUID, pm_id: uuid.UUID) -> None:
+        sc = await self.get_or_create_customer(organization_id)
+
+        result = await self.db.execute(
+            select(StripePaymentMethod).where(
+                StripePaymentMethod.id == pm_id,
+                StripePaymentMethod.stripe_customer_id == sc.id,
+            )
+        )
+        pm = result.scalar_one_or_none()
+        if not pm:
+            raise ValueError("Método de pago no encontrado")
+
+        # Detach de Stripe
+        _require_stripe_keys()
+        stripe.PaymentMethod.detach(pm.stripe_pm_id)
+        await self.db.delete(pm)
+        await self.db.flush()
+
+    # ─── Subscriptions ───────────────────────────────────────
+
+    async def create_subscription(self, organization_id: uuid.UUID, plan_slug: str) -> StripeSubscription:
+        """Crea una suscripción en Stripe y la vincula con OrganizationSubscription."""
+        _require_stripe_keys()
+        # Obtener plan
+        plan_result = await self.db.execute(select(Plan).where(Plan.slug == plan_slug, Plan.is_active.is_(True)))
+        plan = plan_result.scalar_one_or_none()
+        if not plan:
+            raise ValueError(f"Plan '{plan_slug}' no encontrado")
+        if not plan.stripe_price_id:
+            raise ValueError(f"Plan '{plan_slug}' no tiene precio configurado en Stripe")
+
+        sc = await self.get_or_create_customer(organization_id)
+
+        # Verificar que tenga un método de pago
+        pms = await self.list_payment_methods(organization_id)
+        if not pms:
+            raise ValueError("Debes agregar un método de pago antes de suscribirte")
+
+        # Cancelar suscripción Stripe existente si hay una
+        existing_sub = await self._get_active_stripe_subscription(organization_id)
+        if existing_sub:
+            stripe.Subscription.cancel(existing_sub.stripe_subscription_id)
+            existing_sub.status = "cancelled"
+            await self.db.flush()
+
+        # Cancelar org subscription actual
+        await self.db.execute(
+            update(OrganizationSubscription)
+            .where(
+                OrganizationSubscription.organization_id == organization_id,
+                OrganizationSubscription.status.in_(["trial", "active"]),
+            )
+            .values(status="cancelled", updated_at=datetime.now(timezone.utc))
+        )
+
+        # Crear suscripción en Stripe
+        sub = stripe.Subscription.create(
+            customer=sc.stripe_customer_id,
+            items=[{"price": plan.stripe_price_id}],
+            payment_behavior="default_incomplete",
+            expand=["latest_invoice.payment_intent"],
+        )
+
+        # Crear OrganizationSubscription
+        org_sub = OrganizationSubscription(
+            organization_id=organization_id,
+            plan_id=plan.id,
+            status="active",
+            started_at=datetime.now(timezone.utc),
+        )
+        self.db.add(org_sub)
+        await self.db.flush()
+
+        # Crear StripeSubscription
+        stripe_sub = StripeSubscription(
+            organization_id=organization_id,
+            org_subscription_id=org_sub.id,
+            stripe_subscription_id=sub.id,
+            stripe_price_id=plan.stripe_price_id,
+            status=sub.status,
+            current_period_start=datetime.fromtimestamp(sub.current_period_start, tz=timezone.utc) if sub.current_period_start else None,
+            current_period_end=datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc) if sub.current_period_end else None,
+        )
+        self.db.add(stripe_sub)
+        await self.db.flush()
+        return stripe_sub
+
+    async def cancel_subscription(self, organization_id: uuid.UUID) -> StripeSubscription:
+        """Cancela la suscripción al final del periodo."""
+        _require_stripe_keys()
+        sub = await self._get_active_stripe_subscription(organization_id)
+        if not sub:
+            raise ValueError("No tienes una suscripción activa")
+
+        stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
+        sub.cancel_at_period_end = True
+        await self.db.flush()
+        return sub
+
+    async def get_billing_overview(self, organization_id: uuid.UUID) -> dict:
+        """Resumen de billing: suscripción, métodos de pago, facturas recientes."""
+        sub = await self._get_active_stripe_subscription(organization_id)
+        pms = await self.list_payment_methods(organization_id)
+        invoices = await self._get_recent_invoices(organization_id, limit=5)
+
+        return {
+            "subscription": sub,
+            "payment_methods": pms,
+            "recent_invoices": invoices,
+        }
+
+    # ─── Webhook Handlers ────────────────────────────────────
+
+    async def handle_invoice_paid(self, stripe_invoice: dict) -> None:
+        """Procesa invoice.payment_succeeded."""
+        stripe_sub_id = stripe_invoice.get("subscription")
+        if not stripe_sub_id:
+            return
+
+        result = await self.db.execute(
+            select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub_id)
+        )
+        sub = result.scalar_one_or_none()
+        if not sub:
+            return
+
+        invoice = StripeInvoice(
+            stripe_subscription_id=sub.id,
+            stripe_invoice_id=stripe_invoice["id"],
+            amount=stripe_invoice["amount_paid"] / 100,  # Stripe usa centavos
+            currency=stripe_invoice.get("currency", "mxn"),
+            status="paid",
+            invoice_url=stripe_invoice.get("hosted_invoice_url"),
+            paid_at=datetime.now(timezone.utc),
+        )
+        self.db.add(invoice)
+        await self.db.flush()
+
+    async def handle_invoice_failed(self, stripe_invoice: dict) -> None:
+        """Procesa invoice.payment_failed."""
+        stripe_sub_id = stripe_invoice.get("subscription")
+        if not stripe_sub_id:
+            return
+
+        result = await self.db.execute(
+            select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub_id)
+        )
+        sub = result.scalar_one_or_none()
+        if not sub:
+            return
+
+        invoice = StripeInvoice(
+            stripe_subscription_id=sub.id,
+            stripe_invoice_id=stripe_invoice["id"],
+            amount=stripe_invoice["amount_due"] / 100,
+            currency=stripe_invoice.get("currency", "mxn"),
+            status="failed",
+            invoice_url=stripe_invoice.get("hosted_invoice_url"),
+        )
+        self.db.add(invoice)
+        await self.db.flush()
+
+    async def handle_subscription_updated(self, stripe_sub: dict) -> None:
+        """Procesa customer.subscription.updated."""
+        result = await self.db.execute(
+            select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
+        )
+        sub = result.scalar_one_or_none()
+        if not sub:
+            return
+
+        sub.status = stripe_sub["status"]
+        sub.cancel_at_period_end = stripe_sub.get("cancel_at_period_end", False)
+        if stripe_sub.get("current_period_start"):
+            sub.current_period_start = datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc)
+        if stripe_sub.get("current_period_end"):
+            sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
+        await self.db.flush()
+
+    async def handle_subscription_deleted(self, stripe_sub: dict) -> None:
+        """Procesa customer.subscription.deleted — downgrade a Starter."""
+        result = await self.db.execute(
+            select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
+        )
+        sub = result.scalar_one_or_none()
+        if not sub:
+            return
+
+        sub.status = "cancelled"
+
+        # Downgrade a Starter
+        starter_result = await self.db.execute(select(Plan).where(Plan.slug == "starter"))
+        starter = starter_result.scalar_one_or_none()
+        if starter:
+            # Cancelar org subscription actual
+            await self.db.execute(
+                update(OrganizationSubscription)
+                .where(OrganizationSubscription.id == sub.org_subscription_id)
+                .values(status="cancelled", updated_at=datetime.now(timezone.utc))
+            )
+            # Crear suscripción Starter
+            org_sub = OrganizationSubscription(
+                organization_id=sub.organization_id,
+                plan_id=starter.id,
+                status="active",
+                started_at=datetime.now(timezone.utc),
+            )
+            self.db.add(org_sub)
+
+        await self.db.flush()
+
+    # ─── Helpers privados ────────────────────────────────────
+
+    async def _get_active_stripe_subscription(self, organization_id: uuid.UUID) -> StripeSubscription | None:
+        result = await self.db.execute(
+            select(StripeSubscription).where(
+                StripeSubscription.organization_id == organization_id,
+                StripeSubscription.status.in_(["active", "trialing", "past_due"]),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _get_recent_invoices(self, organization_id: uuid.UUID, limit: int = 5) -> list[StripeInvoice]:
+        # Obtener stripe_subscription_ids de la org
+        sub_result = await self.db.execute(
+            select(StripeSubscription.id).where(StripeSubscription.organization_id == organization_id)
+        )
+        sub_ids = [row[0] for row in sub_result.all()]
+        if not sub_ids:
+            return []
+
+        result = await self.db.execute(
+            select(StripeInvoice)
+            .where(StripeInvoice.stripe_subscription_id.in_(sub_ids))
+            .order_by(StripeInvoice.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
