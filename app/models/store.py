@@ -64,6 +64,8 @@ class Store(Base):
     longitude: Mapped[float | None] = mapped_column(Numeric(10, 7))
     # Warehouse
     is_warehouse: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Billing — fecha desde la cual esta tienda genera cobro extra (1ro del mes siguiente a su creación)
+    billing_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Trial
     trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -619,13 +619,27 @@ class BackofficeService:
         if not org:
             return None
 
-        # Contar tiendas activas (excluyendo warehouse)
+        from datetime import datetime, timezone as tz
+        now = datetime.now(tz.utc)
+
+        # Contar tiendas activas totales (excluyendo warehouse)
         store_count = (await db.execute(
             select(func.count(Store.id)).where(
                 Store.organization_id == org_id,
                 Store.is_warehouse.isnot(True),
             )
         )).scalar() or 0
+
+        # Contar tiendas ya facturables (billing_starts_at <= ahora)
+        billable_count = (await db.execute(
+            select(func.count(Store.id)).where(
+                Store.organization_id == org_id,
+                Store.is_warehouse.isnot(True),
+                Store.billing_starts_at <= now,
+            )
+        )).scalar() or 0
+
+        pending_billing = store_count - billable_count
 
         # Suscripción y plan
         sub_result = await db.execute(
@@ -647,6 +661,8 @@ class BackofficeService:
                 "price_per_extra_store": 0,
                 "extra_stores_total": 0,
                 "monthly_total": 0,
+                "pending_billing_count": pending_billing,
+                "next_month_total": 0,
                 "subscription_status": None,
                 "started_at": None,
                 "expires_at": None,
@@ -657,14 +673,21 @@ class BackofficeService:
         max_stores = features.get("max_stores", 1)
         price_extra = features.get("price_per_additional_store", 0)
 
-        # Si max_stores es -1 (ilimitado), no hay extras
+        # Cobro actual: solo tiendas ya facturables
         if max_stores == -1:
             extra_stores = 0
         else:
-            extra_stores = max(0, store_count - max_stores)
+            extra_stores = max(0, billable_count - max_stores)
 
         extra_total = extra_stores * price_extra
         monthly_total = float(plan.price_monthly) + extra_total
+
+        # Cobro próximo mes: todas las tiendas activas
+        if max_stores == -1:
+            next_extra = 0
+        else:
+            next_extra = max(0, store_count - max_stores)
+        next_month_total = float(plan.price_monthly) + (next_extra * price_extra)
 
         return {
             "organization_id": org.id,
@@ -677,6 +700,8 @@ class BackofficeService:
             "price_per_extra_store": price_extra,
             "extra_stores_total": extra_total,
             "monthly_total": monthly_total,
+            "pending_billing_count": pending_billing,
+            "next_month_total": next_month_total,
             "subscription_status": sub.status,
             "started_at": sub.started_at,
             "expires_at": sub.expires_at,
