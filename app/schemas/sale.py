@@ -95,6 +95,19 @@ class SalesSummaryResponse(BaseModel):
     platform_count: int
 
 
+class WeatherSnapshotBrief(BaseModel):
+    temperature: float | None = None
+    feels_like: float | None = None
+    humidity: int | None = None
+    weather_main: str | None = None
+    weather_description: str | None = None
+    clouds: int | None = None
+    wind_speed: float | None = None
+    rain_1h: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class SaleResponse(BaseModel):
     id: UUID
     store_id: UUID
@@ -120,6 +133,8 @@ class SaleResponse(BaseModel):
     payments: list[PaymentResponse] = []
     created_at: datetime
     user_name: str | None = None
+    weather_snapshot_id: UUID | None = None
+    weather_snapshot: WeatherSnapshotBrief | None = None
 
     model_config = {"from_attributes": True}
 

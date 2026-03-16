@@ -10,6 +10,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.customer import Customer
+    from app.models.weather import WeatherSnapshot
 
 
 class Sale(Base):
@@ -36,11 +37,13 @@ class Sale(Base):
     cash_received: Mapped[float | None] = mapped_column(Numeric(12, 2))
     change_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     status: Mapped[str] = mapped_column(String(20), default="completed")
+    weather_snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("weather_snapshots.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
     items: Mapped[list["SaleItem"]] = relationship(back_populates="sale", cascade="all, delete-orphan")
     payments: Mapped[list["Payment"]] = relationship(back_populates="sale", cascade="all, delete-orphan")
     customer: Mapped["Customer | None"] = relationship(back_populates="sales")
+    weather_snapshot: Mapped["WeatherSnapshot | None"] = relationship()
 
 
 class SaleItem(Base):

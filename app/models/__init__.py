@@ -23,6 +23,7 @@ from app.models.warehouse import WarehouseEntry, WarehouseEntryItem, WarehouseTr
 from app.models.subscription import Plan, OrganizationSubscription
 from app.models.stripe import StripeCustomer, StripePaymentMethod, StripeSubscription, StripeInvoice
 from app.models.backoffice import BowUser, BowSession, BowBlockLog, BowPlanPriceHistory, BowAuditLog, BowCommissionConfig, AiUsageDaily
+from app.models.weather import WeatherSnapshot
 
 __all__ = [
     "Person", "User", "Password", "PersonPhone", "Role", "UserRolePermission",
@@ -50,4 +51,5 @@ __all__ = [
     "Plan", "OrganizationSubscription",
     "StripeCustomer", "StripePaymentMethod", "StripeSubscription", "StripeInvoice",
     "BowUser", "BowSession", "BowBlockLog", "BowPlanPriceHistory", "BowAuditLog", "BowCommissionConfig", "AiUsageDaily",
+    "WeatherSnapshot",
 ]

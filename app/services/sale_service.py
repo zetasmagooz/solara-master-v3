@@ -9,12 +9,14 @@ from sqlalchemy.orm import selectinload
 from app.models.catalog import Product
 from app.models.customer import Customer
 from app.models.sale import Payment, Sale, SaleItem
+from app.models.weather import WeatherSnapshot
 from app.models.store import StoreConfig
 from app.models.supply import ProductSupply, Supply
 from app.models.user import User, Person
 from app.models.variant import ProductVariant
 from app.schemas.sale import SaleCreate
 from app.services.customer_service import CustomerService
+from app.services.weather_service import WeatherService
 
 
 class SaleService:
@@ -36,6 +38,10 @@ class SaleService:
     async def create_sale(self, data: SaleCreate, user_id: UUID | None = None) -> Sale:
         sale_number = await self._generate_sale_number(data.store_id)
 
+        # Obtener weather snapshot (no bloquea si falla)
+        weather_service = WeatherService(self.db)
+        weather_snapshot_id = await weather_service.get_or_fetch_snapshot(data.store_id)
+
         sale = Sale(
             store_id=data.store_id,
             user_id=user_id,
@@ -56,6 +62,7 @@ class SaleService:
             cash_received=data.cash_received,
             change_amount=data.change_amount,
             status=data.status,
+            weather_snapshot_id=weather_snapshot_id,
         )
         self.db.add(sale)
         await self.db.flush()
@@ -114,6 +121,7 @@ class SaleService:
                 selectinload(Sale.items),
                 selectinload(Sale.payments),
                 selectinload(Sale.customer),
+                selectinload(Sale.weather_snapshot),
             )
         )
         result = await self.db.execute(stmt)
@@ -190,6 +198,7 @@ class SaleService:
                 selectinload(Sale.items),
                 selectinload(Sale.payments),
                 selectinload(Sale.customer),
+                selectinload(Sale.weather_snapshot),
             )
         )
         result = await self.db.execute(stmt)
@@ -223,6 +232,7 @@ class SaleService:
                 selectinload(Sale.items),
                 selectinload(Sale.payments),
                 selectinload(Sale.customer),
+                selectinload(Sale.weather_snapshot),
             )
             .order_by(Sale.created_at.desc())
             .limit(limit)
