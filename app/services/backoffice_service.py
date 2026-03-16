@@ -480,21 +480,24 @@ class BackofficeService:
     def _calc_commissions(
         self, amount: float, payment_method: str | None,
         commission_map: dict, card_amount: float | None = None,
+        terminal: str | None = None,
     ) -> tuple[float, float]:
         """Calcular comisiones para una venta.
 
-        Las comisiones SOLO aplican a pagos con tarjeta:
-        - Comisión Solara: se cobra sobre el monto pagado con tarjeta
-        - Comisión procesador (card_fee): se cobra sobre el monto con tarjeta
+        Las comisiones SOLO aplican a pagos con tarjeta EcartPay:
+        - Terminal propia (normal): sin comisión Solara
+        - Terminal EcartPay: comisión Solara + procesador
         - Efectivo y transferencia: sin comisión
-
-        Para ventas mixtas, card_amount indica cuánto se pagó con tarjeta.
         """
         is_card = payment_method in ("card", "tarjeta")
         is_mixed = payment_method == "mixed" or card_amount is not None
 
         # Si no es tarjeta ni mixta → sin comisiones
         if not is_card and not is_mixed:
+            return 0.0, 0.0
+
+        # Solo EcartPay genera comisión; terminal propia (normal) no
+        if terminal != "ecartpay":
             return 0.0, 0.0
 
         # Monto sobre el que se calcula: todo si es tarjeta, solo la parte card si es mixta
@@ -589,7 +592,7 @@ class BackofficeService:
                     pay_method = "mixed"
                     card_amount = card_total
 
-            solara_comm, proc_comm = self._calc_commissions(amount, pay_method, commission_map, card_amount)
+            solara_comm, proc_comm = self._calc_commissions(amount, pay_method, commission_map, card_amount, terminal_val)
             net = round(amount - solara_comm - proc_comm, 2)
 
             items.append({
@@ -887,7 +890,7 @@ class BackofficeService:
             total_sales = int(sr.cnt) if sr else 0
             total_sales_rev = float(sr.rev) if sr else 0
 
-            # Comisión estimada: solo sobre ventas con tarjeta
+            # Comisión estimada: solo sobre ventas con tarjeta EcartPay
             card_rev_result = await db.execute(
                 select(func.coalesce(func.sum(Payment.amount), 0))
                 .join(Sale, Sale.id == Payment.sale_id)
@@ -896,6 +899,7 @@ class BackofficeService:
                     Sale.status != "cancelled",
                     Sale.created_at >= date_30d_ago,
                     Payment.method.in_(["card", "tarjeta"]),
+                    Payment.terminal == "ecartpay",
                 )
             )
             card_rev = float(card_rev_result.scalar() or 0)
