@@ -137,6 +137,21 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
 
     can_add = max_stores == -1 or active_count < max_stores
 
+    # Contar tiendas ya facturables (billing_starts_at <= now) vs pendientes
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+    billable_result = await db.execute(
+        select(func.count()).select_from(Store).where(
+            Store.owner_id == user.id,
+            Store.is_active.is_(True),
+            Store.is_warehouse.is_(False),
+            Store.billing_starts_at <= now,
+        )
+    )
+    billable_count = billable_result.scalar() or 0
+    billable_additional = max(0, billable_count - free_stores)
+    pending_billing = active_count - billable_count
+
     return {
         "active_stores_count": active_count,
         "max_stores": max_stores,
@@ -147,8 +162,13 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
         "free_stores": free_stores,
         "additional_stores_count": additional,
         "additional_stores_cost": additional * price_extra,
+        "billable_stores_count": billable_count,
+        "billable_additional": billable_additional,
+        "billable_cost": billable_additional * price_extra,
+        "pending_billing_count": pending_billing,
         "base_monthly": float(plan.price_monthly),
-        "total_monthly": float(plan.price_monthly) + (additional * price_extra),
+        "total_monthly": float(plan.price_monthly) + (billable_additional * price_extra),
+        "next_month_total": float(plan.price_monthly) + (additional * price_extra),
         "status": sub.status,
         "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
     }
@@ -240,7 +260,20 @@ async def create_store(
         if not store_data.get("currency_id") and org.default_currency_id:
             store_data["currency_id"] = org.default_currency_id
 
-    store = Store(owner_id=current_user.id, organization_id=org_id, **store_data)
+    # billing_starts_at = 1ro del mes siguiente (la tienda nueva se cobra a partir del próximo ciclo)
+    from datetime import datetime, timezone as tz
+    now = datetime.now(tz.utc)
+    if now.month == 12:
+        billing_start = datetime(now.year + 1, 1, 1, tzinfo=tz.utc)
+    else:
+        billing_start = datetime(now.year, now.month + 1, 1, tzinfo=tz.utc)
+
+    store = Store(
+        owner_id=current_user.id,
+        organization_id=org_id,
+        billing_starts_at=billing_start,
+        **store_data,
+    )
     db.add(store)
     await db.flush()
 

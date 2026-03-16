@@ -31,7 +31,7 @@ async def _can_see_all_orders(user: User, db: AsyncSession) -> bool:
     if not urp or not urp.role:
         return False
     perms = set(urp.role.permissions or [])
-    return bool(perms & {"ventas:cobrar", "ordenes:cobrar"})
+    return bool(perms & {"pos:cobrar", "restaurante:cobrar"})
 
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)

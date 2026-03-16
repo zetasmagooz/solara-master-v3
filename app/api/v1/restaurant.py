@@ -207,7 +207,7 @@ async def remove_table_from_session(
 async def get_checkout_data(
     session_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, require_permission("ventas:cobrar")],
+    _: Annotated[User, require_permission("restaurante:cobrar")],
 ):
     service = RestaurantService(db)
     return await service.convert_session_to_sale_data(session_id)
@@ -218,7 +218,7 @@ async def finalize_session(
     session_id: UUID,
     data: FinalizeSessionRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, require_permission("ventas:cobrar")],
+    _: Annotated[User, require_permission("restaurante:cobrar")],
 ):
     service = RestaurantService(db)
     session = await service.finalize_session(session_id, data.sale_id)

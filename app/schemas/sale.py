@@ -23,6 +23,7 @@ class PaymentCreate(BaseModel):
     amount: float
     reference: str | None = None
     platform: str | None = None
+    terminal: str | None = None  # normal, ecartpay (only for card payments)
 
 
 class SaleCreate(BaseModel):
@@ -71,6 +72,7 @@ class PaymentResponse(BaseModel):
     amount: float
     reference: str | None = None
     platform: str | None = None
+    terminal: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -81,12 +83,29 @@ class SalesSummaryResponse(BaseModel):
     transaction_count: int
     cash: float
     card: float
+    card_normal: float
+    card_ecartpay: float
     transfer: float
     platform: float
     cash_count: int
     card_count: int
+    card_normal_count: int
+    card_ecartpay_count: int
     transfer_count: int
     platform_count: int
+
+
+class WeatherSnapshotBrief(BaseModel):
+    temperature: float | None = None
+    feels_like: float | None = None
+    humidity: int | None = None
+    weather_main: str | None = None
+    weather_description: str | None = None
+    clouds: int | None = None
+    wind_speed: float | None = None
+    rain_1h: float | None = None
+
+    model_config = {"from_attributes": True}
 
 
 class SaleResponse(BaseModel):
@@ -114,6 +133,8 @@ class SaleResponse(BaseModel):
     payments: list[PaymentResponse] = []
     created_at: datetime
     user_name: str | None = None
+    weather_snapshot_id: UUID | None = None
+    weather_snapshot: WeatherSnapshotBrief | None = None
 
     model_config = {"from_attributes": True}
 

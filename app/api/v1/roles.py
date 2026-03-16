@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants.permissions import PERMISSIONS
+from app.constants.permissions import PERMISSION_MODULES, PERMISSIONS
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
 from app.schemas.user import RoleCreate, RoleResponse, RoleUpdate
@@ -13,12 +13,24 @@ from app.services.role_service import RoleService
 router = APIRouter(prefix="/roles", tags=["roles"])
 
 
-@router.get("/permissions", response_model=list[dict])
+@router.get("/permissions")
 async def get_permissions_catalog(
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Catálogo de permisos disponibles."""
-    return [{"key": k, "label": v} for k, v in PERMISSIONS.items()]
+    """Catálogo de permisos agrupados por módulo."""
+    modules = []
+    for module_key, module_data in PERMISSION_MODULES.items():
+        actions = [
+            {"key": k, "label": v}
+            for k, v in module_data["actions"].items()
+        ]
+        modules.append({
+            "module": module_key,
+            "label": module_data["label"],
+            "icon": module_data["icon"],
+            "actions": actions,
+        })
+    return modules
 
 
 @router.get("/{store_id}", response_model=list[RoleResponse])

@@ -14,6 +14,9 @@ from app.utils.security import decode_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
 
+# Scheme separado para el backoffice (no requiere tokenUrl específico)
+bow_oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/backoffice/auth/login")
+
 
 async def get_db() -> AsyncGenerator[AsyncSession]:
     async with AsyncSessionLocal() as session:
@@ -100,3 +103,48 @@ def require_permission(*perms: str):
         return current_user
 
     return Depends(checker)
+
+
+# ── Backoffice dependencies ──────────────────────────────
+
+
+async def get_current_bow_user(
+    token: Annotated[str, Depends(bow_oauth2_scheme)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Valida el JWT del backoffice y retorna el BowUser."""
+    from app.models.backoffice import BowUser
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token de backoffice inválido",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(token)
+        user_id: str | None = payload.get("sub")
+        is_bow: bool = payload.get("bow", False)
+        if user_id is None or not is_bow:
+            raise credentials_exception
+    except Exception:
+        raise credentials_exception
+
+    result = await db.execute(
+        select(BowUser).where(BowUser.id == user_id, BowUser.is_active.is_(True))
+    )
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+async def require_bow_superadmin(
+    current_user=Depends(get_current_bow_user),
+):
+    """Solo permite acceso a superadmins del backoffice."""
+    if current_user.role != "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo superadmins pueden realizar esta acción",
+        )
+    return current_user
