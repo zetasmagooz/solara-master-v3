@@ -23,6 +23,7 @@ class PaymentCreate(BaseModel):
     amount: float
     reference: str | None = None
     platform: str | None = None
+    terminal: str | None = None  # normal, ecartpay (only for card payments)
 
 
 class SaleCreate(BaseModel):
@@ -71,6 +72,7 @@ class PaymentResponse(BaseModel):
     amount: float
     reference: str | None = None
     platform: str | None = None
+    terminal: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -81,10 +83,14 @@ class SalesSummaryResponse(BaseModel):
     transaction_count: int
     cash: float
     card: float
+    card_normal: float
+    card_ecartpay: float
     transfer: float
     platform: float
     cash_count: int
     card_count: int
+    card_normal_count: int
+    card_ecartpay_count: int
     transfer_count: int
     platform_count: int
 

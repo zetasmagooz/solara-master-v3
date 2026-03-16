@@ -95,6 +95,7 @@ class SaleService:
                 amount=pay_data.amount,
                 reference=pay_data.reference,
                 platform=pay_data.platform,
+                terminal=pay_data.terminal if pay_data.method == "card" else None,
             )
             self.db.add(payment)
 
@@ -266,6 +267,12 @@ class SaleService:
                     func.sum(case((Payment.method == "card", Payment.amount), else_=0)), 0
                 ).label("card"),
                 func.coalesce(
+                    func.sum(case(((Payment.method == "card") & (Payment.terminal == "normal"), Payment.amount), else_=0)), 0
+                ).label("card_normal"),
+                func.coalesce(
+                    func.sum(case(((Payment.method == "card") & (Payment.terminal == "ecartpay"), Payment.amount), else_=0)), 0
+                ).label("card_ecartpay"),
+                func.coalesce(
                     func.sum(case((Payment.method == "transfer", Payment.amount), else_=0)), 0
                 ).label("transfer"),
                 func.coalesce(
@@ -273,6 +280,8 @@ class SaleService:
                 ).label("platform"),
                 func.count(case((Payment.method == "cash", 1))).label("cash_count"),
                 func.count(case((Payment.method == "card", 1))).label("card_count"),
+                func.count(case(((Payment.method == "card") & (Payment.terminal == "normal"), 1))).label("card_normal_count"),
+                func.count(case(((Payment.method == "card") & (Payment.terminal == "ecartpay"), 1))).label("card_ecartpay_count"),
                 func.count(case((Payment.method == "transfer", 1))).label("transfer_count"),
                 func.count(case((Payment.method == "platform", 1))).label("platform_count"),
             )
@@ -296,10 +305,14 @@ class SaleService:
             "transaction_count": int(row.transaction_count),
             "cash": float(row.cash),
             "card": float(row.card),
+            "card_normal": float(row.card_normal),
+            "card_ecartpay": float(row.card_ecartpay),
             "transfer": float(row.transfer),
             "platform": float(row.platform),
             "cash_count": int(row.cash_count),
             "card_count": int(row.card_count),
+            "card_normal_count": int(row.card_normal_count),
+            "card_ecartpay_count": int(row.card_ecartpay_count),
             "transfer_count": int(row.transfer_count),
             "platform_count": int(row.platform_count),
         }

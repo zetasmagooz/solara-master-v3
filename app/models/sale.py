@@ -69,10 +69,11 @@ class Payment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     sale_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False)
-    method: Mapped[str] = mapped_column(String(50), nullable=False)  # cash, card, transfer
+    method: Mapped[str] = mapped_column(String(50), nullable=False)  # cash, card, transfer, platform
     amount: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     reference: Mapped[str | None] = mapped_column(String(200))
     platform: Mapped[str | None] = mapped_column(String(50))
+    terminal: Mapped[str | None] = mapped_column(String(20))  # normal, ecartpay (only for card payments)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
     sale: Mapped[Sale] = relationship(back_populates="payments")

@@ -560,13 +560,27 @@ class BackofficeService:
 
             # Obtener TODOS los pagos de esta venta para detectar mixtas
             pay_result = await db.execute(
-                select(Payment.method, Payment.amount).where(Payment.sale_id == row.id)
+                select(Payment.method, Payment.amount, Payment.terminal, Payment.platform).where(Payment.sale_id == row.id)
             )
             payments = pay_result.all()
 
             # Determinar método y monto con tarjeta
             pay_method = payments[0].method if payments else None
             card_amount = None
+            terminal_val = None
+            platform_val = None
+
+            if payments:
+                # Get terminal from first card payment
+                for p in payments:
+                    if p.method in ("card", "tarjeta") and p.terminal:
+                        terminal_val = p.terminal
+                        break
+                # Get platform name from first platform payment
+                for p in payments:
+                    if p.method == "platform" and p.platform:
+                        platform_val = p.platform
+                        break
 
             if len(payments) > 1:
                 # Venta mixta: sumar solo lo pagado con tarjeta
@@ -585,6 +599,8 @@ class BackofficeService:
                 "user_name": row.user_name,
                 "total": amount,
                 "payment_method": pay_method,
+                "terminal": terminal_val,
+                "platform_name": platform_val,
                 "solara_commission": solara_comm,
                 "processor_commission": proc_comm,
                 "net_revenue": net,
