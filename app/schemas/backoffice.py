@@ -187,6 +187,8 @@ class BowOrgSaleResponse(BaseModel):
     user_name: str | None = None
     total: float
     payment_method: str | None = None
+    terminal: str | None = None
+    platform_name: str | None = None
     solara_commission: float
     processor_commission: float
     net_revenue: float
