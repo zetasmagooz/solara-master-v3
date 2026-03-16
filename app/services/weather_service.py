@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class WeatherService:
-    BASE_URL = "https://api.openweathermap.org/data/3.0/onecall"
+    BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -73,32 +73,35 @@ class WeatherService:
             "appid": settings.WEATHER_API_KEY,
             "units": "metric",
             "lang": "es",
-            "exclude": "minutely,hourly,daily,alerts",
         }
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(self.BASE_URL, params=params)
             resp.raise_for_status()
             data = resp.json()
 
-        current = data["current"]
-        weather_info = current.get("weather", [{}])[0]
+        main = data.get("main", {})
+        wind = data.get("wind", {})
+        weather_info = data.get("weather", [{}])[0]
+        clouds = data.get("clouds", {})
+        rain = data.get("rain", {})
+        snow = data.get("snow", {})
 
         return WeatherSnapshot(
             store_id=store_id,
-            temperature=current.get("temp"),
-            feels_like=current.get("feels_like"),
-            humidity=current.get("humidity"),
-            pressure=current.get("pressure"),
-            wind_speed=current.get("wind_speed"),
-            wind_deg=current.get("wind_deg"),
-            wind_gust=current.get("wind_gust"),
+            temperature=main.get("temp"),
+            feels_like=main.get("feels_like"),
+            humidity=main.get("humidity"),
+            pressure=main.get("pressure"),
+            wind_speed=wind.get("speed"),
+            wind_deg=wind.get("deg"),
+            wind_gust=wind.get("gust"),
             weather_main=weather_info.get("main"),
             weather_description=weather_info.get("description"),
-            clouds=current.get("clouds"),
-            visibility=current.get("visibility"),
-            uv_index=current.get("uvi"),
-            rain_1h=current.get("rain", {}).get("1h") if current.get("rain") else None,
-            snow_1h=current.get("snow", {}).get("1h") if current.get("snow") else None,
-            dew_point=current.get("dew_point"),
+            clouds=clouds.get("all"),
+            visibility=data.get("visibility"),
+            uv_index=None,  # Not available in 2.5 API
+            rain_1h=rain.get("1h") if rain else None,
+            snow_1h=snow.get("1h") if snow else None,
+            dew_point=None,  # Not available in 2.5 API
             fetched_at=datetime.now(timezone.utc),
         )
