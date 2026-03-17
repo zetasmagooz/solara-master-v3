@@ -66,6 +66,30 @@ class CashStatusResponse(BaseModel):
     movements: list[MovementResponse]
 
 
+# ── Expense report schemas ───────────────────────────────
+
+class ExpenseRecord(BaseModel):
+    id: UUID
+    date: datetime
+    category: str | None = None
+    description: str
+    amount: float
+    user_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ExpensePage(BaseModel):
+    data: list[ExpenseRecord]
+    total: int
+    hasMore: bool
+
+
+class ExpenseSummary(BaseModel):
+    records: list[ExpenseRecord]
+    total: int
+
+
 class CutResponse(BaseModel):
     id: UUID
     store_id: UUID
