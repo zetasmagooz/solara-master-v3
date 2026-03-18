@@ -1,6 +1,7 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time
 from typing import Annotated
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,8 +64,9 @@ async def list_expenses(
     limit: int = Query(default=10, le=200),
     offset: int = Query(default=0, ge=0),
 ):
-    dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min).replace(tzinfo=timezone.utc) if date_from else None
-    dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59)).replace(tzinfo=timezone.utc) if date_to else None
+    tz_mx = ZoneInfo("America/Mexico_City")
+    dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min, tzinfo=tz_mx) if date_from else None
+    dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59), tzinfo=tz_mx) if date_to else None
     service = CheckoutService(db)
     records, total = await service.list_expenses(store_id, dt_from, dt_to, category, limit, offset)
     return ExpensePage(
@@ -83,8 +85,9 @@ async def get_expenses_summary(
     date_to: str | None = Query(default=None, description="YYYY-MM-DD"),
     category: str | None = Query(default=None),
 ):
-    dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min).replace(tzinfo=timezone.utc) if date_from else None
-    dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59)).replace(tzinfo=timezone.utc) if date_to else None
+    tz_mx = ZoneInfo("America/Mexico_City")
+    dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min, tzinfo=tz_mx) if date_from else None
+    dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59), tzinfo=tz_mx) if date_to else None
     service = CheckoutService(db)
     records, total = await service.list_expenses(store_id, dt_from, dt_to, category, limit=9999, offset=0)
     return ExpenseSummary(
