@@ -123,6 +123,26 @@ class BowPaymentResponse(BaseModel):
     created_at: datetime
 
 
+class BowInvoiceListItem(BaseModel):
+    id: uuid.UUID
+    stripe_invoice_id: str
+    organization_name: str
+    plan_name: str | None = None
+    amount: float
+    currency: str = "mxn"
+    status: str
+    invoice_url: str | None = None
+    paid_at: datetime | None = None
+    created_at: datetime
+
+
+class BowInvoicesSummary(BaseModel):
+    total_collected: float
+    paid_count: int
+    pending_count: int
+    collection_rate: float
+
+
 # ── Bloqueos ─────────────────────────────────────────────
 
 class BowBlockRequest(BaseModel):

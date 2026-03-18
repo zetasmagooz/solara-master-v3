@@ -1322,6 +1322,118 @@ class BackofficeService:
             } if discount else None,
         }
 
+    # ── Invoices (Pagos / Facturas) ─────────────────────
+
+    async def list_invoices(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+        status_filter: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict:
+        """Lista paginada de facturas Stripe con filtros."""
+        db = self.db
+
+        base = (
+            select(
+                StripeInvoice.id,
+                StripeInvoice.stripe_invoice_id,
+                Organization.name.label("organization_name"),
+                Plan.name.label("plan_name"),
+                StripeInvoice.amount,
+                StripeInvoice.currency,
+                StripeInvoice.status,
+                StripeInvoice.invoice_url,
+                StripeInvoice.paid_at,
+                StripeInvoice.created_at,
+            )
+            .join(StripeSubscription, StripeInvoice.stripe_subscription_id == StripeSubscription.id)
+            .join(Organization, StripeSubscription.organization_id == Organization.id)
+            .outerjoin(OrganizationSubscription, StripeSubscription.org_subscription_id == OrganizationSubscription.id)
+            .outerjoin(Plan, OrganizationSubscription.plan_id == Plan.id)
+        )
+
+        # Filtros
+        if search and search.strip():
+            base = base.where(Organization.name.ilike(f"%{search.strip()}%"))
+        if status_filter and status_filter.strip():
+            base = base.where(StripeInvoice.status == status_filter.strip())
+        if date_from:
+            base = base.where(StripeInvoice.created_at >= date_from)
+        if date_to:
+            base = base.where(StripeInvoice.created_at <= date_to)
+
+        # Total
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await db.execute(count_q)).scalar() or 0
+        total_pages = max(1, (total + page_size - 1) // page_size)
+
+        # Datos paginados
+        rows = (
+            await db.execute(
+                base.order_by(StripeInvoice.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        ).all()
+
+        items = [
+            {
+                "id": r.id,
+                "stripe_invoice_id": r.stripe_invoice_id,
+                "organization_name": r.organization_name,
+                "plan_name": r.plan_name or "—",
+                "amount": float(r.amount),
+                "currency": r.currency,
+                "status": r.status,
+                "invoice_url": r.invoice_url,
+                "paid_at": r.paid_at.isoformat() if r.paid_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
+
+    async def get_invoices_summary(self) -> dict:
+        """Resumen de facturación: total cobrado, pagadas, pendientes, tasa."""
+        db = self.db
+
+        # Total cobrado (paid)
+        total_collected = (
+            await db.execute(
+                select(func.coalesce(func.sum(StripeInvoice.amount), 0))
+                .where(StripeInvoice.status == "paid")
+            )
+        ).scalar() or 0
+
+        # Conteo por status
+        status_counts = await db.execute(
+            select(StripeInvoice.status, func.count(StripeInvoice.id))
+            .group_by(StripeInvoice.status)
+        )
+        counts = dict(status_counts.all())
+        paid_count = counts.get("paid", 0)
+        pending_count = counts.get("open", 0) + counts.get("draft", 0)
+        total_invoices = sum(counts.values()) if counts else 0
+
+        collection_rate = round((paid_count / total_invoices * 100), 1) if total_invoices > 0 else 0
+
+        return {
+            "total_collected": float(total_collected),
+            "paid_count": paid_count,
+            "pending_count": pending_count,
+            "collection_rate": collection_rate,
+        }
+
     # ── Audit ────────────────────────────────────────────
 
     async def log_audit(

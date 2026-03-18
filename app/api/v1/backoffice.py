@@ -21,6 +21,7 @@ from app.schemas.backoffice import (
     BowDashboardMetrics,
     BowDiscountResponse,
     BowGrantTrialRequest,
+    BowInvoicesSummary,
     BowMonthlyRevenue,
     BowOrganizationDetail,
     BowOrganizationResponse,
@@ -472,3 +473,37 @@ async def get_promotions(
 ):
     """Trial y descuento activos de una organización."""
     return await service.get_org_active_promotions(org_id)
+
+
+# ── Pagos / Facturas ────────────────────────────────
+
+
+@router.get("/payments", response_model=BowPaginatedResponse)
+async def list_payments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str = Query("", description="Buscar por nombre de organización"),
+    status: str = Query("", description="Filtrar por status (paid, open, draft, void, uncollectible)"),
+    date_from: str = Query("", description="Fecha inicio (YYYY-MM-DD)"),
+    date_to: str = Query("", description="Fecha fin (YYYY-MM-DD)"),
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Lista paginada de facturas Stripe."""
+    return await service.list_invoices(
+        page=page,
+        page_size=page_size,
+        search=search or None,
+        status_filter=status or None,
+        date_from=date_from or None,
+        date_to=date_to or None,
+    )
+
+
+@router.get("/payments/summary", response_model=BowInvoicesSummary)
+async def get_payments_summary(
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Resumen de facturación (KPIs)."""
+    return await service.get_invoices_summary()
