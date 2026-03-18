@@ -474,7 +474,10 @@ class CheckoutService:
         return deposit
 
     async def create_expense(self, data: ExpenseCreate, store_id: UUID, user_id: UUID | None, is_owner: bool = True) -> CheckoutExpense:
-        await self._validate_cash_sufficient(float(data.amount), store_id, user_id=user_id, is_owner=is_owner)
+        # Owner puede registrar gastos sin necesidad de tener efectivo en caja
+        # (gastos fijos como renta, sueldos, etc. no salen del efectivo de caja)
+        if not is_owner:
+            await self._validate_cash_sufficient(float(data.amount), store_id, user_id=user_id, is_owner=is_owner)
         expense = CheckoutExpense(
             store_id=store_id,
             user_id=user_id,
