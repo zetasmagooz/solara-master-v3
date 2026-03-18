@@ -536,6 +536,68 @@ class CheckoutService:
         await self.db.flush()
         return cut
 
+    async def list_expenses(
+        self,
+        store_id: UUID,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        category: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """List expenses with filters, pagination, and total count."""
+        from sqlalchemy import func as sa_func
+
+        base_filters = [CheckoutExpense.store_id == store_id]
+        if date_from:
+            base_filters.append(CheckoutExpense.created_at >= date_from)
+        if date_to:
+            base_filters.append(CheckoutExpense.created_at <= date_to)
+        if category:
+            base_filters.append(CheckoutExpense.category == category)
+
+        # Total count
+        count_stmt = select(sa_func.count(CheckoutExpense.id)).where(*base_filters)
+        total = (await self.db.execute(count_stmt)).scalar() or 0
+
+        # Paginated data
+        stmt = (
+            select(CheckoutExpense)
+            .where(*base_filters)
+            .order_by(CheckoutExpense.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        result = await self.db.execute(stmt)
+        expenses = list(result.scalars().all())
+
+        # Enrich with user names
+        user_ids = {e.user_id for e in expenses if e.user_id}
+        name_map: dict = {}
+        if user_ids:
+            names_stmt = (
+                select(User.id, Person.first_name, Person.last_name)
+                .join(Person, User.person_id == Person.id)
+                .where(User.id.in_(user_ids))
+            )
+            name_map = {
+                row.id: f"{row.first_name} {row.last_name}".strip()
+                for row in (await self.db.execute(names_stmt)).all()
+            }
+
+        records = [
+            {
+                "id": e.id,
+                "date": e.created_at,
+                "category": e.category,
+                "description": e.description,
+                "amount": float(e.amount),
+                "user_name": name_map.get(e.user_id) if e.user_id else None,
+            }
+            for e in expenses
+        ]
+        return records, total
+
     async def get_cuts(self, store_id: UUID, user_id: UUID | None = None, is_owner: bool = True, limit: int = 20) -> list:
         stmt = (
             select(CheckoutCut)
