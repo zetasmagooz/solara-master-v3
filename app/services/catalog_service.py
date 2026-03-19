@@ -767,6 +767,11 @@ class CatalogService:
     async def save_product_image(
         self, product_id: UUID, base64_data: str, is_primary: bool, host_url: str
     ) -> ProductImage:
+        """
+        Guarda imagen de producto. UNA sola imagen por producto.
+        Filename = {product_id}.jpg — siempre sobreescribe el archivo en disco.
+        Si ya existe registro en DB, lo actualiza; si no, lo crea.
+        """
         # Decode base64 — support data URI and raw base64
         if "," in base64_data:
             header, encoded = base64_data.split(",", 1)
@@ -788,7 +793,6 @@ class CatalogService:
         elif "image/jpeg" in header or "image/jpg" in header:
             mime_type = "image/jpeg"
         else:
-            # Detect from magic bytes
             if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
                 mime_type = "image/png"
             elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
@@ -799,39 +803,36 @@ class CatalogService:
         if mime_type not in settings.ALLOWED_IMAGE_TYPES:
             raise ValueError(f"Image type {mime_type} not allowed")
 
-        ext = mimetypes.guess_extension(mime_type) or ".jpg"
-        if ext == ".jpe":
-            ext = ".jpg"
-        filename = f"{uuid_mod.uuid4()}{ext}"
+        # Filename = product_id.jpg (siempre jpg, sobreescribe)
+        filename = f"{product_id}.jpg"
 
-        # Save to disk
+        # Save/overwrite to disk
         upload_dir = Path(settings.UPLOAD_DIR) / "products"
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = upload_dir / filename
         file_path.write_bytes(image_bytes)
 
-        # If primary, unset others
-        if is_primary:
-            existing = await self.db.execute(
-                select(ProductImage).where(
-                    ProductImage.product_id == product_id, ProductImage.is_primary.is_(True)
-                )
-            )
-            for img in existing.scalars().all():
-                img.is_primary = False
-
-        # Get next sort_order
-        count_result = await self.db.execute(
-            select(func.count()).select_from(ProductImage).where(ProductImage.product_id == product_id)
+        # Upsert: buscar registro existente o crear uno nuevo
+        # Timestamp en la URL para invalidar cache del cliente
+        import time
+        ts = int(time.time())
+        image_url = f"{host_url.rstrip('/')}/uploads/products/{filename}?t={ts}"
+        result = await self.db.execute(
+            select(ProductImage).where(ProductImage.product_id == product_id)
         )
-        next_order = (count_result.scalar() or 0)
+        existing = result.scalar_one_or_none()
 
-        image_url = f"{host_url.rstrip('/')}/uploads/products/{filename}"
+        if existing:
+            existing.image_url = image_url
+            existing.is_primary = True
+            await self.db.flush()
+            return existing
+
         product_image = ProductImage(
             product_id=product_id,
             image_url=image_url,
-            is_primary=is_primary,
-            sort_order=next_order,
+            is_primary=True,
+            sort_order=0,
         )
         self.db.add(product_image)
         await self.db.flush()
@@ -843,9 +844,8 @@ class CatalogService:
         if not image:
             return False
 
-        # Delete file from disk
-        # Extract filename from URL
-        filename = image.image_url.split("/")[-1]
+        # Delete file from disk: {product_id}.jpg
+        filename = f"{image.product_id}.jpg"
         file_path = Path(settings.UPLOAD_DIR) / "products" / filename
         if file_path.exists():
             file_path.unlink()
@@ -982,3 +982,152 @@ class CatalogService:
         await self.db.delete(item)
         await self.db.flush()
         return True
+
+    # --- Bulk Import ---
+    async def bulk_import_products(
+        self,
+        store_id: UUID,
+        rows: list[dict],
+        host_url: str,
+        generate_images: bool = False,
+    ) -> dict:
+        from app.schemas.catalog import BulkImportRowError
+
+        errors: list[dict] = []
+        created_ids: list[str] = []
+
+        # 1. Collect unique category, subcategory, brand names
+        category_names = {r["category_name"].strip() for r in rows if r.get("category_name") and r["category_name"].strip()}
+        subcategory_names = {r["subcategory_name"].strip() for r in rows if r.get("subcategory_name") and r["subcategory_name"].strip()}
+        brand_names = {r["brand_name"].strip() for r in rows if r.get("brand_name") and r["brand_name"].strip()}
+
+        # 2. Resolve or create categories
+        cat_map: dict[str, UUID] = {}
+        for name in category_names:
+            result = await self.db.execute(
+                select(Category).where(
+                    Category.store_id == store_id,
+                    func.lower(func.trim(Category.name)) == name.lower().strip(),
+                    Category.is_active.is_(True),
+                )
+            )
+            cat = result.scalar_one_or_none()
+            if not cat:
+                cat = Category(store_id=store_id, name=name.strip())
+                self.db.add(cat)
+                await self.db.flush()
+            cat_map[name.lower().strip()] = cat.id
+
+        # 3. Resolve or create brands
+        brand_map: dict[str, UUID] = {}
+        for name in brand_names:
+            result = await self.db.execute(
+                select(Brand).where(
+                    Brand.store_id == store_id,
+                    func.lower(func.trim(Brand.name)) == name.lower().strip(),
+                    Brand.is_active.is_(True),
+                )
+            )
+            brand = result.scalar_one_or_none()
+            if not brand:
+                brand = Brand(store_id=store_id, name=name.strip())
+                self.db.add(brand)
+                await self.db.flush()
+            brand_map[name.lower().strip()] = brand.id
+
+        # 4. Resolve or create subcategories (need parent category)
+        subcat_map: dict[str, UUID] = {}
+        for r in rows:
+            sub_name = (r.get("subcategory_name") or "").strip()
+            cat_name = (r.get("category_name") or "").strip()
+            if not sub_name or not cat_name:
+                continue
+            key = f"{cat_name.lower()}::{sub_name.lower()}"
+            if key in subcat_map:
+                continue
+            parent_id = cat_map.get(cat_name.lower().strip())
+            if not parent_id:
+                continue
+            result = await self.db.execute(
+                select(Subcategory).where(
+                    Subcategory.store_id == store_id,
+                    Subcategory.category_id == parent_id,
+                    func.lower(func.trim(Subcategory.name)) == sub_name.lower(),
+                    Subcategory.is_active.is_(True),
+                )
+            )
+            sub = result.scalar_one_or_none()
+            if not sub:
+                sub = Subcategory(store_id=store_id, category_id=parent_id, name=sub_name)
+                self.db.add(sub)
+                await self.db.flush()
+            subcat_map[key] = sub.id
+
+        # 5. Validate and insert each row
+        products_to_add = []
+        for r in rows:
+            row_num = r["row_number"]
+            name = (r.get("name") or "").strip()
+            base_price = r.get("base_price")
+
+            if not name:
+                errors.append({"row_number": row_num, "field": "name", "message": "El nombre es obligatorio"})
+                continue
+            if base_price is None or base_price <= 0:
+                errors.append({"row_number": row_num, "field": "base_price", "message": "El precio debe ser mayor a 0"})
+                continue
+            stock = r.get("stock", 0) or 0
+            if stock < 0:
+                errors.append({"row_number": row_num, "field": "stock", "message": "El stock no puede ser negativo"})
+                continue
+
+            # Resolve IDs
+            category_id = None
+            cat_name = (r.get("category_name") or "").strip()
+            if cat_name:
+                category_id = cat_map.get(cat_name.lower())
+
+            subcategory_id = None
+            sub_name = (r.get("subcategory_name") or "").strip()
+            if sub_name and cat_name:
+                key = f"{cat_name.lower()}::{sub_name.lower()}"
+                subcategory_id = subcat_map.get(key)
+
+            brand_id = None
+            b_name = (r.get("brand_name") or "").strip()
+            if b_name:
+                brand_id = brand_map.get(b_name.lower())
+
+            product = Product(
+                store_id=store_id,
+                name=name,
+                base_price=base_price,
+                description=r.get("description"),
+                sku=r.get("sku"),
+                barcode=r.get("barcode"),
+                cost_price=r.get("cost_price"),
+                stock=stock,
+                min_stock=r.get("min_stock", 0) or 0,
+                max_stock=r.get("max_stock"),
+                category_id=category_id,
+                subcategory_id=subcategory_id,
+                brand_id=brand_id,
+                expiry_date=r.get("expiry_date"),
+                show_in_pos=r.get("show_in_pos", True),
+                show_in_kiosk=r.get("show_in_kiosk", True),
+            )
+            products_to_add.append(product)
+
+        # Bulk insert valid products
+        if products_to_add:
+            self.db.add_all(products_to_add)
+            await self.db.flush()
+            created_ids = [str(p.id) for p in products_to_add]
+
+        return {
+            "total_rows": len(rows),
+            "success_count": len(created_ids),
+            "error_count": len(errors),
+            "errors": errors,
+            "created_product_ids": created_ids,
+        }

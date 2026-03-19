@@ -32,5 +32,8 @@ Pillow>=10.0.0
 # Payments
 stripe>=8.0.0
 
+# Excel processing
+openpyxl>=3.1.0
+
 # Sync DB engine (for AI memory manager)
 psycopg2-binary==2.9.10

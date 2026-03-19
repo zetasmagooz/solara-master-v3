@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Generic, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, computed_field, model_validator
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 T = TypeVar("T")
 
@@ -583,3 +583,42 @@ class ComboResponse(BaseModel):
     items: list[ComboItemResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+# --- Bulk Import ---
+class BulkImportProductRow(BaseModel):
+    row_number: int
+    name: str
+    base_price: float
+    description: str | None = None
+    sku: str | None = None
+    barcode: str | None = None
+    cost_price: float | None = None
+    stock: float = 0
+    min_stock: float = 0
+    max_stock: float | None = None
+    category_name: str | None = None
+    subcategory_name: str | None = None
+    brand_name: str | None = None
+    expiry_date: date | None = None
+    show_in_pos: bool = True
+    show_in_kiosk: bool = True
+
+
+class BulkImportRequest(BaseModel):
+    products: list[BulkImportProductRow]
+    generate_images: bool = False
+
+
+class BulkImportRowError(BaseModel):
+    row_number: int
+    field: str
+    message: str
+
+
+class BulkImportResponse(BaseModel):
+    total_rows: int
+    success_count: int
+    error_count: int
+    errors: list[BulkImportRowError]
+    created_product_ids: list[str]

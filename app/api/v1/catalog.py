@@ -1,7 +1,9 @@
+from io import BytesIO
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
@@ -13,6 +15,8 @@ from app.schemas.catalog import (
     BrandCreate,
     BrandResponse,
     BrandUpdate,
+    BulkImportRequest,
+    BulkImportResponse,
     CategoryCreate,
     CategoryResponse,
     CategoryUpdate,
@@ -285,6 +289,152 @@ async def create_product(
     if attributes_data:
         return await service.create_product_with_attributes(store_id, attributes_data, **payload)
     return await service.create_product(store_id, **payload)
+
+
+# --- Bulk Import ---
+@router.get("/products/import-template")
+async def download_import_template():
+    """Generate and download Excel template for bulk product import."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+
+    # --- Sheet 1: Productos ---
+    ws = wb.active
+    ws.title = "Productos"
+
+    headers = [
+        ("Nombre*", True),
+        ("Precio de Venta*", True),
+        ("Descripción", False),
+        ("SKU", False),
+        ("Código de Barras", False),
+        ("Precio de Costo", False),
+        ("Stock", False),
+        ("Stock Mínimo", False),
+        ("Stock Máximo", False),
+        ("Categoría", False),
+        ("Subcategoría", False),
+        ("Marca", False),
+        ("Fecha de Caducidad", False),
+        ("Mostrar en POS", False),
+        ("Mostrar en Kiosko", False),
+    ]
+
+    orange_fill = PatternFill(start_color="FF8C00", end_color="FF8C00", fill_type="solid")
+    blue_fill = PatternFill(start_color="4A90D9", end_color="4A90D9", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    widths = [25, 18, 35, 15, 18, 18, 12, 14, 14, 20, 20, 20, 18, 16, 16]
+
+    for col_idx, (header_text, is_required) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header_text)
+        cell.fill = orange_fill if is_required else blue_fill
+        cell.font = header_font
+        cell.alignment = header_align
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths[col_idx - 1]
+
+    # Example row
+    example = [
+        "Coca Cola 600ml", 25.00, "Refresco de cola 600ml", "COC-600",
+        "7501055300846", 18.50, 50, 10, 100, "Bebidas", "Refrescos",
+        "Coca Cola", "2026-12-31", "SI", "SI",
+    ]
+    for col_idx, val in enumerate(example, 1):
+        ws.cell(row=2, column=col_idx, value=val)
+
+    ws.row_dimensions[1].height = 30
+
+    # --- Sheet 2: Instrucciones ---
+    ws2 = wb.create_sheet("Instrucciones")
+    ws2.column_dimensions["A"].width = 80
+
+    instructions = [
+        "INSTRUCCIONES PARA LLENAR LA PLANTILLA",
+        "",
+        "Campos obligatorios (marcados con *) — columnas en naranja:",
+        "  • Nombre*: Nombre del producto (texto)",
+        "  • Precio de Venta*: Precio al público (número mayor a 0)",
+        "",
+        "Campos opcionales — columnas en azul:",
+        "  • Descripción: Descripción del producto",
+        "  • SKU: Código interno del producto",
+        "  • Código de Barras: Código de barras del producto",
+        "  • Precio de Costo: Precio de compra (número)",
+        "  • Stock: Cantidad en inventario (número, default: 0)",
+        "  • Stock Mínimo: Cantidad mínima de alerta (número, default: 0)",
+        "  • Stock Máximo: Cantidad máxima permitida (número)",
+        "  • Categoría: Nombre de la categoría (se crea automáticamente si no existe)",
+        "  • Subcategoría: Nombre de la subcategoría (requiere Categoría, se crea automáticamente)",
+        "  • Marca: Nombre de la marca (se crea automáticamente si no existe)",
+        "  • Fecha de Caducidad: Formato YYYY-MM-DD (ejemplo: 2026-12-31)",
+        "  • Mostrar en POS: SI o NO (default: SI)",
+        "  • Mostrar en Kiosko: SI o NO (default: SI)",
+        "",
+        "NOTAS IMPORTANTES:",
+        "  • La fila 1 contiene los encabezados — NO la modifiques",
+        "  • La fila 2 tiene un ejemplo — puedes borrarla o reemplazarla",
+        "  • Empieza a llenar desde la fila 2 (o fila 3 si dejas el ejemplo)",
+        "  • Límite recomendado: 500 productos por importación",
+        "  • Las imágenes se agregan después desde la app (individual o con IA)",
+        "  • Las categorías, subcategorías y marcas se crean automáticamente si no existen",
+    ]
+    title_font = Font(bold=True, size=14)
+    normal_font = Font(size=11)
+    for i, line in enumerate(instructions, 1):
+        cell = ws2.cell(row=i, column=1, value=line)
+        cell.font = title_font if i == 1 else normal_font
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_productos.xlsx"},
+    )
+
+
+@router.post("/products/bulk-import", response_model=BulkImportResponse)
+async def bulk_import_products(
+    store_id: Annotated[UUID, Query()],
+    data: BulkImportRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Bulk import products from parsed Excel data."""
+    service = CatalogService(db)
+    host_url = str(request.base_url).rstrip("/")
+    rows = [r.model_dump() for r in data.products]
+    result = await service.bulk_import_products(store_id, rows, host_url, data.generate_images)
+
+    # Generate images in background if requested
+    if data.generate_images and result["created_product_ids"]:
+        async def _gen_images(product_ids: list[str], base_url: str):
+            from app.database import AsyncSessionLocal
+            import base64 as b64mod
+            async with AsyncSessionLocal() as bg_db:
+                bg_service = CatalogService(bg_db)
+                for pid in product_ids:
+                    try:
+                        product = await bg_service.get_product(UUID(pid))
+                        if product:
+                            jpeg_bytes = await generate_product_image(product.name, product.description)
+                            b64_data = f"data:image/jpeg;base64,{b64mod.b64encode(jpeg_bytes).decode()}"
+                            await bg_service.save_product_image(UUID(pid), b64_data, True, base_url)
+                    except Exception:
+                        pass
+                await bg_db.commit()
+
+        background_tasks.add_task(_gen_images, result["created_product_ids"], host_url)
+
+    return result
 
 
 @router.get("/products/{product_id}", response_model=ProductResponse)
