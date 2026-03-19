@@ -606,7 +606,7 @@ class BulkImportProductRow(BaseModel):
 
 
 class BulkImportRequest(BaseModel):
-    products: list[BulkImportProductRow]
+    products: list[BulkImportProductRow] = Field(..., max_length=10000)
     generate_images: bool = False
 
 

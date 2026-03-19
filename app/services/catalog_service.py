@@ -984,6 +984,52 @@ class CatalogService:
         return True
 
     # --- Bulk Import ---
+    async def _resolve_or_create_bulk(
+        self,
+        model,
+        store_id: UUID,
+        names: set[str],
+        extra_filter=None,
+        extra_kwargs_fn=None,
+    ) -> dict[str, UUID]:
+        """Resolve existing or bulk-create entities by name. Returns {lowercase_name: id}."""
+        result_map: dict[str, UUID] = {}
+        if not names:
+            return result_map
+
+        # Batch fetch all existing in one query
+        stmt = select(model).where(
+            model.store_id == store_id,
+            func.lower(func.trim(model.name)).in_([n.lower().strip() for n in names]),
+            model.is_active.is_(True),
+        )
+        if extra_filter is not None:
+            stmt = stmt.where(extra_filter)
+        result = await self.db.execute(stmt)
+        for entity in result.scalars().all():
+            result_map[entity.name.lower().strip()] = entity.id
+
+        # Bulk create missing
+        missing = [n for n in names if n.lower().strip() not in result_map]
+        if missing:
+            new_entities = []
+            for name in missing:
+                kwargs = {"store_id": store_id, "name": name.strip()}
+                if extra_kwargs_fn:
+                    extra = extra_kwargs_fn(name)
+                    if extra is None:
+                        continue
+                    kwargs.update(extra)
+                entity = model(**kwargs)
+                new_entities.append(entity)
+            if new_entities:
+                self.db.add_all(new_entities)
+                await self.db.flush()
+                for entity in new_entities:
+                    result_map[entity.name.lower().strip()] = entity.id
+
+        return result_map
+
     async def bulk_import_products(
         self,
         store_id: UUID,
@@ -991,80 +1037,64 @@ class CatalogService:
         host_url: str,
         generate_images: bool = False,
     ) -> dict:
-        from app.schemas.catalog import BulkImportRowError
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        CHUNK_SIZE = 500
         errors: list[dict] = []
         created_ids: list[str] = []
 
-        # 1. Collect unique category, subcategory, brand names
+        # 1. Collect unique names
         category_names = {r["category_name"].strip() for r in rows if r.get("category_name") and r["category_name"].strip()}
-        subcategory_names = {r["subcategory_name"].strip() for r in rows if r.get("subcategory_name") and r["subcategory_name"].strip()}
         brand_names = {r["brand_name"].strip() for r in rows if r.get("brand_name") and r["brand_name"].strip()}
 
-        # 2. Resolve or create categories
-        cat_map: dict[str, UUID] = {}
-        for name in category_names:
-            result = await self.db.execute(
-                select(Category).where(
-                    Category.store_id == store_id,
-                    func.lower(func.trim(Category.name)) == name.lower().strip(),
-                    Category.is_active.is_(True),
-                )
-            )
-            cat = result.scalar_one_or_none()
-            if not cat:
-                cat = Category(store_id=store_id, name=name.strip())
-                self.db.add(cat)
-                await self.db.flush()
-            cat_map[name.lower().strip()] = cat.id
+        # 2. Batch resolve/create categories and brands (1 query each)
+        cat_map = await self._resolve_or_create_bulk(Category, store_id, category_names)
+        brand_map = await self._resolve_or_create_bulk(Brand, store_id, brand_names)
 
-        # 3. Resolve or create brands
-        brand_map: dict[str, UUID] = {}
-        for name in brand_names:
-            result = await self.db.execute(
-                select(Brand).where(
-                    Brand.store_id == store_id,
-                    func.lower(func.trim(Brand.name)) == name.lower().strip(),
-                    Brand.is_active.is_(True),
-                )
-            )
-            brand = result.scalar_one_or_none()
-            if not brand:
-                brand = Brand(store_id=store_id, name=name.strip())
-                self.db.add(brand)
-                await self.db.flush()
-            brand_map[name.lower().strip()] = brand.id
-
-        # 4. Resolve or create subcategories (need parent category)
+        # 3. Batch resolve/create subcategories (grouped by parent category)
         subcat_map: dict[str, UUID] = {}
+        subcat_pairs: dict[str, tuple[str, UUID]] = {}  # key -> (sub_name, parent_id)
         for r in rows:
             sub_name = (r.get("subcategory_name") or "").strip()
             cat_name = (r.get("category_name") or "").strip()
             if not sub_name or not cat_name:
                 continue
             key = f"{cat_name.lower()}::{sub_name.lower()}"
-            if key in subcat_map:
-                continue
             parent_id = cat_map.get(cat_name.lower().strip())
-            if not parent_id:
-                continue
-            result = await self.db.execute(
-                select(Subcategory).where(
-                    Subcategory.store_id == store_id,
-                    Subcategory.category_id == parent_id,
-                    func.lower(func.trim(Subcategory.name)) == sub_name.lower(),
-                    Subcategory.is_active.is_(True),
-                )
-            )
-            sub = result.scalar_one_or_none()
-            if not sub:
-                sub = Subcategory(store_id=store_id, category_id=parent_id, name=sub_name)
-                self.db.add(sub)
-                await self.db.flush()
-            subcat_map[key] = sub.id
+            if parent_id and key not in subcat_pairs:
+                subcat_pairs[key] = (sub_name, parent_id)
 
-        # 5. Validate and insert each row
-        products_to_add = []
+        if subcat_pairs:
+            # Fetch all existing subcategories for this store in one query
+            all_sub_names = [v[0].lower().strip() for v in subcat_pairs.values()]
+            stmt = select(Subcategory).where(
+                Subcategory.store_id == store_id,
+                func.lower(func.trim(Subcategory.name)).in_(all_sub_names),
+                Subcategory.is_active.is_(True),
+            )
+            result = await self.db.execute(stmt)
+            for sub in result.scalars().all():
+                k = f"{sub.category_id}"
+                # Match by category_id + name
+                for key, (sname, pid) in subcat_pairs.items():
+                    if sub.category_id == pid and sub.name.lower().strip() == sname.lower().strip():
+                        subcat_map[key] = sub.id
+
+            # Create missing subcategories
+            missing_subs = []
+            for key, (sname, pid) in subcat_pairs.items():
+                if key not in subcat_map:
+                    missing_subs.append(Subcategory(store_id=store_id, category_id=pid, name=sname))
+            if missing_subs:
+                self.db.add_all(missing_subs)
+                await self.db.flush()
+                for sub in missing_subs:
+                    for key, (sname, pid) in subcat_pairs.items():
+                        if sub.category_id == pid and sub.name.lower().strip() == sname.lower().strip():
+                            subcat_map[key] = sub.id
+
+        # 4. Validate all rows and build insert dicts
+        valid_rows: list[dict] = []
         for r in rows:
             row_num = r["row_number"]
             name = (r.get("name") or "").strip()
@@ -1081,48 +1111,37 @@ class CatalogService:
                 errors.append({"row_number": row_num, "field": "stock", "message": "El stock no puede ser negativo"})
                 continue
 
-            # Resolve IDs
-            category_id = None
             cat_name = (r.get("category_name") or "").strip()
-            if cat_name:
-                category_id = cat_map.get(cat_name.lower())
-
-            subcategory_id = None
             sub_name = (r.get("subcategory_name") or "").strip()
-            if sub_name and cat_name:
-                key = f"{cat_name.lower()}::{sub_name.lower()}"
-                subcategory_id = subcat_map.get(key)
-
-            brand_id = None
             b_name = (r.get("brand_name") or "").strip()
-            if b_name:
-                brand_id = brand_map.get(b_name.lower())
 
-            product = Product(
-                store_id=store_id,
-                name=name,
-                base_price=base_price,
-                description=r.get("description"),
-                sku=r.get("sku"),
-                barcode=r.get("barcode"),
-                cost_price=r.get("cost_price"),
-                stock=stock,
-                min_stock=r.get("min_stock", 0) or 0,
-                max_stock=r.get("max_stock"),
-                category_id=category_id,
-                subcategory_id=subcategory_id,
-                brand_id=brand_id,
-                expiry_date=r.get("expiry_date"),
-                show_in_pos=r.get("show_in_pos", True),
-                show_in_kiosk=r.get("show_in_kiosk", True),
-            )
-            products_to_add.append(product)
+            valid_rows.append({
+                "store_id": store_id,
+                "name": name,
+                "base_price": base_price,
+                "description": r.get("description") or None,
+                "sku": r.get("sku") or None,
+                "barcode": r.get("barcode") or None,
+                "cost_price": r.get("cost_price"),
+                "stock": stock,
+                "min_stock": r.get("min_stock", 0) or 0,
+                "max_stock": r.get("max_stock"),
+                "category_id": cat_map.get(cat_name.lower()) if cat_name else None,
+                "subcategory_id": subcat_map.get(f"{cat_name.lower()}::{sub_name.lower()}") if sub_name and cat_name else None,
+                "brand_id": brand_map.get(b_name.lower()) if b_name else None,
+                "expiry_date": r.get("expiry_date"),
+                "show_in_pos": r.get("show_in_pos", True),
+                "show_in_kiosk": r.get("show_in_kiosk", True),
+            })
 
-        # Bulk insert valid products
-        if products_to_add:
-            self.db.add_all(products_to_add)
-            await self.db.flush()
-            created_ids = [str(p.id) for p in products_to_add]
+        # 5. Bulk INSERT in chunks using raw INSERT ... VALUES (bypasses ORM per-row overhead)
+        if valid_rows:
+            for i in range(0, len(valid_rows), CHUNK_SIZE):
+                chunk = valid_rows[i : i + CHUNK_SIZE]
+                stmt = pg_insert(Product).values(chunk).returning(Product.id)
+                result = await self.db.execute(stmt)
+                chunk_ids = [str(row[0]) for row in result.fetchall()]
+                created_ids.extend(chunk_ids)
 
         return {
             "total_rows": len(rows),

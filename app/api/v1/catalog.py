@@ -378,7 +378,7 @@ async def download_import_template():
         "  • La fila 1 contiene los encabezados — NO la modifiques",
         "  • La fila 2 tiene un ejemplo — puedes borrarla o reemplazarla",
         "  • Empieza a llenar desde la fila 2 (o fila 3 si dejas el ejemplo)",
-        "  • Límite recomendado: 500 productos por importación",
+        "  • Límite máximo: 10,000 productos por importación",
         "  • Las imágenes se agregan después desde la app (individual o con IA)",
         "  • Las categorías, subcategorías y marcas se crean automáticamente si no existen",
     ]
