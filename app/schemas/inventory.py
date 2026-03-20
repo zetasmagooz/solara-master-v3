@@ -82,3 +82,61 @@ class InventoryEntryResponse(BaseModel):
     user_name: str | None = None
     created_at: str
     items: list[InventoryEntryItemResponse]
+
+
+# ── Entradas de insumos (ingreso/egreso/reemplazo) ──
+
+class SupplyEntryItemCreate(BaseModel):
+    supply_id: str
+    quantity: float = Field(..., gt=0)
+    unit_cost: float = 0
+
+
+class SupplyEntryCreate(BaseModel):
+    movement_type: MovementType
+    supplier_name: str | None = None
+    notes: str | None = None
+    items: list[SupplyEntryItemCreate] = Field(..., min_length=1)
+
+
+class SupplyEntryItemResponse(BaseModel):
+    supply_id: str
+    supply_name: str
+    supply_unit: str | None = None
+    quantity: float
+    unit_cost: float
+    previous_stock: float
+    new_stock: float
+
+
+class SupplyEntryResponse(BaseModel):
+    id: str
+    store_id: str
+    movement_type: str
+    supplier_name: str | None = None
+    notes: str | None = None
+    total_items: int
+    total_cost: float
+    user_id: str | None = None
+    user_name: str | None = None
+    created_at: str
+    items: list[SupplyEntryItemResponse]
+
+
+# ── Bitácora unificada de inventario (productos + insumos) ──
+
+class LogItemProduct(BaseModel):
+    name: str
+    quantity: float
+
+
+class InventoryLogEntry(BaseModel):
+    id: str
+    type: str  # "product_entry" | "supply_entry"
+    description: str
+    movement_type: str  # ingreso | egreso | reemplazo
+    total_items: int
+    supplier_name: str | None = None
+    created_by_name: str | None = None
+    products: list[LogItemProduct] = []
+    created_at: str

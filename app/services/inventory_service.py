@@ -1,12 +1,14 @@
+import math
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Product
-from app.models.inventory import InventoryAdjustment, InventoryAdjustmentItem
+from app.models.inventory import InventoryAdjustment, InventoryAdjustmentItem, InventoryMovement
+from app.models.supply import Supply
 from app.models.user import Person, User
 from app.models.variant import ProductVariant
 from app.schemas.inventory import (
@@ -16,6 +18,11 @@ from app.schemas.inventory import (
     InventoryEntryCreate,
     InventoryEntryItemResponse,
     InventoryEntryResponse,
+    InventoryLogEntry,
+    LogItemProduct,
+    SupplyEntryCreate,
+    SupplyEntryItemResponse,
+    SupplyEntryResponse,
 )
 
 
@@ -336,3 +343,228 @@ class InventoryService:
             created_at=adjustment.created_at.isoformat() if adjustment.created_at else datetime.now(timezone.utc).isoformat(),
             items=response_items,
         )
+
+    async def create_supply_entry(
+        self, store_id: uuid.UUID, user_id: uuid.UUID, data: SupplyEntryCreate
+    ) -> SupplyEntryResponse:
+        """Registra un movimiento de insumos (ingreso/egreso/reemplazo)."""
+        movement = data.movement_type.value
+        reason_map = {
+            "ingreso": "Entrada de insumos",
+            "egreso": "Egreso de insumos",
+            "reemplazo": "Reemplazo de stock de insumos",
+        }
+        reason = reason_map.get(movement, movement)
+        if data.supplier_name:
+            reason += f" — {data.supplier_name}"
+        if data.notes:
+            reason += f" | {data.notes}"
+
+        response_items: list[SupplyEntryItemResponse] = []
+        total_cost = 0.0
+
+        for item in data.items:
+            supply_id = uuid.UUID(item.supply_id)
+            result = await self.db.execute(
+                select(Supply).where(
+                    Supply.id == supply_id,
+                    Supply.store_id == store_id,
+                )
+            )
+            supply = result.scalar_one_or_none()
+            if not supply:
+                continue
+
+            previous_stock = float(supply.current_stock or 0)
+
+            if movement == "ingreso":
+                new_stock = previous_stock + item.quantity
+            elif movement == "egreso":
+                new_stock = max(0, previous_stock - item.quantity)
+            else:  # reemplazo
+                new_stock = item.quantity
+
+            # Actualizar stock del insumo
+            supply.current_stock = new_stock
+
+            # Actualizar costo si se proporciona
+            if item.unit_cost > 0:
+                supply.cost_per_unit = item.unit_cost
+
+            # Registrar movimiento en inventory_movements (auditoría)
+            mov = InventoryMovement(
+                store_id=store_id,
+                supply_id=supply_id,
+                user_id=user_id,
+                movement_type=movement,
+                quantity=item.quantity,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+                reason=reason,
+            )
+            self.db.add(mov)
+
+            total_cost += item.quantity * item.unit_cost
+
+            response_items.append(SupplyEntryItemResponse(
+                supply_id=str(supply_id),
+                supply_name=supply.name,
+                supply_unit=supply.unit,
+                quantity=item.quantity,
+                unit_cost=item.unit_cost,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+            ))
+
+        await self.db.flush()
+        user_name = await self._get_user_name(user_id)
+
+        # Usar created_at del primer movimiento o now
+        created_at = datetime.now(timezone.utc).isoformat()
+
+        return SupplyEntryResponse(
+            id=str(uuid.uuid4()),
+            store_id=str(store_id),
+            movement_type=movement,
+            supplier_name=data.supplier_name,
+            notes=data.notes,
+            total_items=len(response_items),
+            total_cost=total_cost,
+            user_id=str(user_id),
+            user_name=user_name,
+            created_at=created_at,
+            items=response_items,
+        )
+
+    async def get_inventory_log(
+        self,
+        store_id: uuid.UUID,
+        log_type: str | None = None,
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict:
+        """Bitácora unificada de movimientos de productos e insumos para una tienda."""
+        results: list[InventoryLogEntry] = []
+
+        # ── Movimientos de productos (inventory_adjustments con reason de entrada/egreso/reemplazo) ──
+        if log_type is None or log_type == "product_entry":
+            count_q = select(func.count()).select_from(InventoryAdjustment).where(
+                InventoryAdjustment.store_id == store_id
+            )
+            total_products = (await self.db.execute(count_q)).scalar() or 0
+
+            q = (
+                select(InventoryAdjustment)
+                .where(InventoryAdjustment.store_id == store_id)
+                .order_by(InventoryAdjustment.created_at.desc())
+                .limit(per_page * page)
+            )
+            adj_result = await self.db.execute(q)
+            for adj in adj_result.scalars().all():
+                user_name = await self._get_user_name(adj.user_id) if adj.user_id else None
+
+                # Obtener items
+                items_q = select(InventoryAdjustmentItem).where(
+                    InventoryAdjustmentItem.adjustment_id == adj.id
+                )
+                adj_items = (await self.db.execute(items_q)).scalars().all()
+                products = []
+                for ai in adj_items:
+                    p_result = await self.db.execute(select(Product.name).where(Product.id == ai.product_id))
+                    pname = p_result.scalar_one_or_none() or "?"
+                    products.append(LogItemProduct(name=pname, quantity=abs(float(ai.new_stock) - float(ai.previous_stock))))
+
+                # Detectar movement_type del reason
+                reason = adj.reason or ""
+                if "Entrada" in reason or "ingreso" in reason.lower():
+                    movement_type = "ingreso"
+                elif "Egreso" in reason or "egreso" in reason.lower():
+                    movement_type = "egreso"
+                elif "Reemplazo" in reason or "reemplazo" in reason.lower():
+                    movement_type = "reemplazo"
+                else:
+                    movement_type = "ajuste"
+
+                # Extraer supplier_name del reason (format: "Tipo — Proveedor | Notas")
+                supplier_name = None
+                if " — " in reason:
+                    parts = reason.split(" — ", 1)
+                    supplier_part = parts[1].split(" | ")[0] if " | " in parts[1] else parts[1]
+                    supplier_name = supplier_part.strip() or None
+
+                results.append(InventoryLogEntry(
+                    id=str(adj.id),
+                    type="product_entry",
+                    description=reason.split(" — ")[0].split(" | ")[0],
+                    movement_type=movement_type,
+                    total_items=adj.total_items or 0,
+                    supplier_name=supplier_name,
+                    created_by_name=user_name,
+                    products=products,
+                    created_at=adj.created_at.isoformat() if adj.created_at else "",
+                ))
+
+        # ── Movimientos de insumos (inventory_movements) ──
+        if log_type is None or log_type == "supply_entry":
+            # Agrupar por reason + created_at (aprox) para unificar entradas batch
+            mov_q = (
+                select(InventoryMovement)
+                .where(InventoryMovement.store_id == store_id)
+                .order_by(InventoryMovement.created_at.desc())
+                .limit(per_page * page)
+            )
+            mov_result = await self.db.execute(mov_q)
+            movements = mov_result.scalars().all()
+
+            # Agrupar movimientos por reason (que es la misma para un batch)
+            from collections import OrderedDict
+            groups: OrderedDict[str, list] = OrderedDict()
+            for mov in movements:
+                key = f"{mov.reason}|{mov.created_at.strftime('%Y-%m-%d %H:%M')}" if mov.created_at else str(mov.id)
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(mov)
+
+            for key, group in groups.items():
+                first = group[0]
+                user_name = await self._get_user_name(first.user_id) if first.user_id else None
+
+                products = []
+                for mov in group:
+                    s_result = await self.db.execute(select(Supply.name).where(Supply.id == mov.supply_id))
+                    sname = s_result.scalar_one_or_none() or "?"
+                    products.append(LogItemProduct(name=sname, quantity=float(mov.quantity)))
+
+                reason = first.reason or ""
+                movement_type = first.movement_type or "ajuste"
+
+                supplier_name = None
+                if " — " in reason:
+                    parts = reason.split(" — ", 1)
+                    supplier_part = parts[1].split(" | ")[0] if " | " in parts[1] else parts[1]
+                    supplier_name = supplier_part.strip() or None
+
+                results.append(InventoryLogEntry(
+                    id=str(first.id),
+                    type="supply_entry",
+                    description=reason.split(" — ")[0].split(" | ")[0],
+                    movement_type=movement_type,
+                    total_items=len(group),
+                    supplier_name=supplier_name,
+                    created_by_name=user_name,
+                    products=products,
+                    created_at=first.created_at.isoformat() if first.created_at else "",
+                ))
+
+        # Ordenar por fecha desc
+        results.sort(key=lambda x: x.created_at, reverse=True)
+
+        # Paginar
+        start = (page - 1) * per_page
+        page_items = results[start : start + per_page]
+
+        return {
+            "items": [item.model_dump() for item in page_items],
+            "page": page,
+            "per_page": per_page,
+        }

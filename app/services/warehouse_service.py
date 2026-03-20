@@ -6,8 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Brand, Category, Product, ProductImage, Subcategory
+from app.models.inventory import InventoryMovement
 from app.models.organization import Organization
 from app.models.store import Store
+from app.models.supply import Supply
 from app.models.user import User
 from app.models.warehouse import (
     WarehouseEntry,
@@ -621,6 +623,100 @@ class WarehouseService:
         )
         return result.scalar_one_or_none()
 
+    async def create_supply_entry(
+        self, warehouse_store_id: uuid.UUID, data: dict, user_id: uuid.UUID
+    ) -> dict:
+        """Registra un movimiento de insumos en el almacén (ingreso/egreso/reemplazo)."""
+        items_data = data.pop("items", [])
+        movement_type = data.get("movement_type", "ingreso")
+        supplier_name = data.get("supplier_name")
+        notes = data.get("notes")
+        total_cost = 0.0
+        total_items = 0
+
+        reason_map = {
+            "ingreso": "Entrada de insumos",
+            "egreso": "Egreso de insumos",
+            "reemplazo": "Reemplazo de stock de insumos",
+        }
+        reason = reason_map.get(movement_type, movement_type)
+        if supplier_name:
+            reason += f" — {supplier_name}"
+        if notes:
+            reason += f" | {notes}"
+
+        response_items = []
+
+        for item_data in items_data:
+            supply_id = item_data["supply_id"]
+            quantity = item_data["quantity"]
+            unit_cost = item_data.get("unit_cost", 0)
+
+            # Buscar supply por id + warehouse_store_id
+            result = await self.db.execute(
+                select(Supply).where(
+                    Supply.id == supply_id,
+                    Supply.store_id == warehouse_store_id,
+                )
+            )
+            supply = result.scalar_one_or_none()
+            if not supply:
+                continue
+
+            previous_stock = float(supply.current_stock or 0)
+
+            if movement_type == "egreso":
+                new_stock = max(0, previous_stock - quantity)
+            elif movement_type == "reemplazo":
+                new_stock = quantity
+            else:  # ingreso
+                new_stock = previous_stock + quantity
+
+            # Actualizar stock
+            supply.current_stock = new_stock
+            if unit_cost > 0:
+                supply.cost_per_unit = unit_cost
+
+            # Registrar en inventory_movements (auditoría)
+            mov = InventoryMovement(
+                store_id=warehouse_store_id,
+                supply_id=supply_id,
+                user_id=user_id,
+                movement_type=movement_type,
+                quantity=quantity,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+                reason=reason,
+            )
+            self.db.add(mov)
+
+            total_cost += quantity * unit_cost
+            total_items += 1
+
+            response_items.append({
+                "supply_id": supply_id,
+                "supply_name": supply.name,
+                "supply_unit": supply.unit,
+                "quantity": quantity,
+                "unit_cost": unit_cost,
+                "previous_stock": previous_stock,
+                "new_stock": new_stock,
+            })
+
+        await self.db.flush()
+
+        return {
+            "id": uuid.uuid4(),
+            "movement_type": movement_type,
+            "supplier_name": supplier_name,
+            "notes": notes,
+            "total_items": total_items,
+            "total_cost": total_cost,
+            "created_by": user_id,
+            "created_at": datetime.now(timezone.utc),
+            "items": response_items,
+        }
+
     async def _get_log(
         self,
         warehouse_store_id: uuid.UUID,
@@ -699,6 +795,62 @@ class WarehouseService:
                     "created_by_name": creator_name,
                     "products": products,
                     "created_at": transfer.created_at,
+                })
+
+        # Movimientos de insumos
+        if log_type is None or log_type == "supply_entry":
+            mov_result = await self.db.execute(
+                select(InventoryMovement)
+                .where(InventoryMovement.store_id == warehouse_store_id)
+                .order_by(InventoryMovement.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            movements = mov_result.scalars().all()
+
+            # Agrupar por reason + minuto
+            from collections import OrderedDict
+            groups: OrderedDict[str, list] = OrderedDict()
+            for mov in movements:
+                key = f"{mov.reason}|{mov.created_at.strftime('%Y-%m-%d %H:%M')}" if mov.created_at else str(mov.id)
+                if key not in groups:
+                    groups[key] = []
+                groups[key].append(mov)
+
+            for key, group in groups.items():
+                first = group[0]
+                creator_name = None
+                if first.user_id:
+                    u_result = await self.db.execute(
+                        select(User).options(selectinload(User.person)).where(User.id == first.user_id)
+                    )
+                    u = u_result.scalar_one_or_none()
+                    if u and u.person:
+                        creator_name = f"{u.person.first_name} {u.person.last_name}".strip()
+
+                products = []
+                for mov in group:
+                    s_result = await self.db.execute(select(Supply.name).where(Supply.id == mov.supply_id))
+                    sname = s_result.scalar_one_or_none() or "Insumo"
+                    products.append({"name": sname, "quantity": float(mov.quantity)})
+
+                reason = first.reason or ""
+                supplier_name = None
+                if " — " in reason:
+                    parts = reason.split(" — ", 1)
+                    supplier_part = parts[1].split(" | ")[0] if " | " in parts[1] else parts[1]
+                    supplier_name = supplier_part.strip() or None
+
+                results.append({
+                    "id": first.id,
+                    "type": "supply_entry",
+                    "description": reason.split(" — ")[0].split(" | ")[0],
+                    "total_items": len(group),
+                    "target_store_name": None,
+                    "supplier_name": supplier_name,
+                    "created_by_name": creator_name,
+                    "products": products,
+                    "created_at": first.created_at,
                 })
 
         # Ordenar por fecha desc

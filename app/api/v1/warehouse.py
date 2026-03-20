@@ -18,6 +18,8 @@ from app.schemas.warehouse import (
     TransferResponse,
     TransferItemResponse,
     WarehouseDashboard,
+    WarehouseSupplyEntryCreate,
+    WarehouseSupplyEntryResponse,
 )
 from app.services.warehouse_service import WarehouseService
 
@@ -195,6 +197,26 @@ async def get_transfer(
     if not transfer or transfer.warehouse_store_id != warehouse_store_id:
         raise HTTPException(404, "Transferencia no encontrada")
     return _transfer_to_response(transfer)
+
+
+# ── Entradas de insumos ──
+
+@router.post("/supply-entries", status_code=201)
+async def create_supply_entry(
+    data: WarehouseSupplyEntryCreate,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Registra un movimiento de insumos en el almacén."""
+    warehouse_store_id = await _get_warehouse_store_id(current_user, db)
+    service = WarehouseService(db)
+    try:
+        result = await service.create_supply_entry(
+            warehouse_store_id, data.model_dump(), current_user.id
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result
 
 
 # ── Bitácora ──

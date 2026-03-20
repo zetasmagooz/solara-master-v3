@@ -17,7 +17,9 @@ from app.schemas.catalog import (
     UnitDefResponse,
     UnitTypeResponse,
 )
+from app.schemas.inventory import SupplyEntryCreate, SupplyEntryResponse
 from app.services.catalog_service import CatalogService
+from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/supplies", tags=["supplies"])
 
@@ -59,6 +61,29 @@ async def create_supply(
 ):
     service = CatalogService(db)
     return await service.create_supply(store_id, **data.model_dump())
+
+
+@router.post("/entries", response_model=SupplyEntryResponse, status_code=status.HTTP_201_CREATED)
+async def create_supply_entry(
+    data: SupplyEntryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Registra un movimiento de insumos (ingreso/egreso/reemplazo)."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    service = InventoryService(db)
+    try:
+        result = await service.create_supply_entry(
+            store_id=current_user.default_store_id,
+            user_id=current_user.id,
+            data=data,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result
 
 
 @router.get("/{supply_id}", response_model=SupplyResponse)

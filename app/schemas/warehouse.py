@@ -80,6 +80,43 @@ class TransferResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Entradas de insumos en almacén ──
+
+class WarehouseSupplyEntryItemCreate(BaseModel):
+    supply_id: UUID
+    quantity: float
+    unit_cost: float = 0
+
+
+class WarehouseSupplyEntryCreate(BaseModel):
+    movement_type: str = "ingreso"  # ingreso | egreso | reemplazo
+    supplier_name: str | None = None
+    notes: str | None = None
+    items: list[WarehouseSupplyEntryItemCreate]
+
+
+class WarehouseSupplyEntryItemResponse(BaseModel):
+    supply_id: UUID
+    supply_name: str
+    supply_unit: str | None = None
+    quantity: float
+    unit_cost: float
+    previous_stock: float
+    new_stock: float
+
+
+class WarehouseSupplyEntryResponse(BaseModel):
+    id: UUID
+    movement_type: str
+    supplier_name: str | None = None
+    notes: str | None = None
+    total_items: int
+    total_cost: float
+    created_by: UUID | None
+    created_at: datetime
+    items: list[WarehouseSupplyEntryItemResponse] = []
+
+
 # ── Bitácora ──
 
 class LogEntryProduct(BaseModel):
@@ -89,7 +126,7 @@ class LogEntryProduct(BaseModel):
 
 class LogEntry(BaseModel):
     id: UUID
-    type: str  # "entry" | "transfer"
+    type: str  # "entry" | "transfer" | "supply_entry"
     description: str
     total_items: int
     target_store_name: str | None = None
