@@ -1,14 +1,16 @@
+from calendar import monthrange
 from datetime import date
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.dependencies import get_current_user, get_db
+from app.models.sale import Payment, Sale
 from app.models.user import Person, User
 from app.schemas.sale import SaleCreate, SaleResponse, SalesSummaryResponse
 from app.services.sale_service import SaleService
@@ -121,6 +123,112 @@ async def get_product_monthly(
     service = SaleService(db)
     months = await service.get_product_monthly(store_id, product_id, year)
     return {"months": months}
+
+
+# ── Chart endpoints ───────────────────────────────────────
+
+
+class DaySalesData(BaseModel):
+    day: int
+    total: float
+    count: int
+
+
+class MonthSalesData(BaseModel):
+    month: int
+    total: float
+    count: int
+
+
+@router.get("/by-day")
+async def sales_by_day(
+    store_id: Annotated[UUID, Query()],
+    year: Annotated[int, Query()],
+    month: Annotated[int, Query(ge=1, le=12)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Daily sales for a given month + previous month for comparison."""
+
+    async def _fetch_days(y: int, m: int) -> list[dict]:
+        days_in = monthrange(y, m)[1]
+        local_day = func.extract("day", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
+        local_month = func.extract("month", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
+        local_year = func.extract("year", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
+
+        stmt = (
+            select(
+                local_day.label("day"),
+                func.coalesce(func.sum(Payment.amount), 0).label("total"),
+                func.count(func.distinct(Sale.id)).label("count"),
+            )
+            .select_from(Payment)
+            .join(Sale, Payment.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != "cancelled",
+                local_year == y,
+                local_month == m,
+            )
+            .group_by(local_day)
+            .order_by(local_day)
+        )
+        result = await db.execute(stmt)
+        rows = {int(r.day): {"total": float(r.total), "count": int(r.count)} for r in result.all()}
+        return [
+            {"day": d, "total": rows.get(d, {}).get("total", 0), "count": rows.get(d, {}).get("count", 0)}
+            for d in range(1, days_in + 1)
+        ]
+
+    prev_month = month - 1 if month > 1 else 12
+    prev_year = year if month > 1 else year - 1
+
+    current = await _fetch_days(year, month)
+    previous = await _fetch_days(prev_year, prev_month)
+
+    return {"current": current, "previous": previous}
+
+
+@router.get("/by-month")
+async def sales_by_month(
+    store_id: Annotated[UUID, Query()],
+    year: Annotated[int, Query()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Monthly sales for a given year + previous year for comparison."""
+
+    async def _fetch_months(y: int) -> list[dict]:
+        local_month = func.extract("month", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
+        local_year = func.extract("year", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
+
+        stmt = (
+            select(
+                local_month.label("month"),
+                func.coalesce(func.sum(Payment.amount), 0).label("total"),
+                func.count(func.distinct(Sale.id)).label("count"),
+            )
+            .select_from(Payment)
+            .join(Sale, Payment.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != "cancelled",
+                local_year == y,
+            )
+            .group_by(local_month)
+            .order_by(local_month)
+        )
+        result = await db.execute(stmt)
+        rows = {int(r.month): {"total": float(r.total), "count": int(r.count)} for r in result.all()}
+        return [
+            {"month": m, "total": rows.get(m, {}).get("total", 0), "count": rows.get(m, {}).get("count", 0)}
+            for m in range(1, 13)
+        ]
+
+    current = await _fetch_months(year)
+    previous = await _fetch_months(year - 1)
+
+    return {"current": current, "previous": previous}
 
 
 @router.get("/{sale_id}", response_model=SaleResponse)

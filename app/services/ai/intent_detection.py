@@ -229,6 +229,8 @@ class IntentDetector:
         (r"\b(m[aá]s\s+(vendido|vende[n]?|se\s+vende))\b.*\b(producto|art[ií]culo)\b", "top_product_by_units_period"),
         (r"\b(producto|art[ií]culo)s?\b.*\bvende[n]?\s+m[aá]s\b", "top_product_by_units_period"),
         (r"\bqu[eé]\b.*\bvende[n]?\s+m[aá]s\b", "top_product_by_units_period"),
+        (r"\bproducto\s+estrella\b", "top_product_by_units_period"),
+        (r"\bbest\s*seller\b", "top_product_by_units_period"),
         (r"\b(ranking|top\s?10|top\s?5|lista de productos|trending|populares|m[aá]s\s+populares)\b", "top_products_ranking_period"),
         (r"\b(utilidad|rentable|ganancia)\b", "top_product_by_profit_period"),
         # Clientes: primero los más específicos, luego el catch-all
@@ -541,7 +543,9 @@ class IntentDetector:
         r"|\b(vende|vendid[oa]s?|compra|gasta)\s+(m[aá]s|menos)\b"
         r"|\b(cu[aá]l|qu[eé]|qui[eé]n)\b.*\b(m[aá]s|menos)\s+(se\s+)?(vende|vendid[oa]|compra|gasta|visita)\b"
         r"|\b(top|ranking|trending|populares|mejores?|peores?)\s+\d*\s*(productos?|clientes?|art[ií]culos?)\b"
-        r"|\b(productos?|art[ií]culos?)\s+(trending|populares)\b",
+        r"|\b(productos?|art[ií]culos?)\s+(trending|populares)\b"
+        r"|\bproducto\s+estrella\b"
+        r"|\bbest\s*seller\b",
         re.IGNORECASE,
     )
 

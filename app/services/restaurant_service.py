@@ -79,6 +79,7 @@ class RestaurantService:
                     current_session = {
                         "id": s.id,
                         "status": s.status,
+                        "service_type": s.service_type or "dine_in",
                         "guest_count": s.guest_count,
                         "customer_name": s.customer_name,
                         "opened_at": s.opened_at,
@@ -107,7 +108,7 @@ class RestaurantService:
     # ── Sessions ─────────────────────────────────────────
 
     async def open_session(self, data: OpenSessionRequest, user_id: UUID | None = None) -> TableSession:
-        # Validate all tables are free
+        # Validate all tables are free (skip for delivery/takeout with no tables)
         for table_id in data.table_ids:
             table = await self.get_table(table_id)
             if not table:
@@ -132,6 +133,7 @@ class RestaurantService:
             customer_id=data.customer_id,
             customer_name=data.customer_name,
             guest_count=data.guest_count,
+            service_type=data.service_type,
             notes=data.notes,
         )
         self.db.add(session)

@@ -290,7 +290,14 @@ class OptimizedAIEngine:
             if not sql:
                 return self._error_response("consulta válida", usage=usage)
 
-            data = await self._execute_sql(sql, params, store_id)
+            try:
+                data = await self._execute_sql(sql, params, store_id)
+            except ValueError as ve:
+                # SQL destructivo bloqueado
+                return self._error_response(
+                    str(ve),
+                    usage=usage,
+                )
             logger.info(f"[DEBUG-AI] Resultado: {data}")
 
             t3 = datetime.now()
@@ -408,9 +415,24 @@ class OptimizedAIEngine:
 
         return result, usage
 
+    # Palabras clave SQL destructivas — NUNCA se ejecutan
+    _FORBIDDEN_SQL = re.compile(
+        r"\b(DROP|ALTER|TRUNCATE|DELETE|INSERT|UPDATE|CREATE|GRANT|REVOKE|EXEC|EXECUTE)\b",
+        re.IGNORECASE,
+    )
+
     async def _execute_sql(
         self, sql: str, params: List[Any], store_id: Optional[str]
     ) -> List[Dict[str, Any]]:
+        # Guard: bloquear cualquier SQL que no sea SELECT/WITH
+        if self._FORBIDDEN_SQL.search(sql):
+            forbidden = self._FORBIDDEN_SQL.findall(sql)
+            logger.warning(f"SQL destructivo bloqueado: {forbidden} — SQL: {sql[:200]}")
+            raise ValueError(
+                "Operación no permitida. Solo se permiten consultas de lectura (SELECT). "
+                "No puedo ejecutar comandos que modifiquen o eliminen datos."
+            )
+
         try:
             sql_exec, bind_params = self._to_bind_params(sql, params, store_id)
             sql_exec = re.sub(r":p(\d+)::uuid\b", r"CAST(:p\1 AS uuid)", sql_exec)

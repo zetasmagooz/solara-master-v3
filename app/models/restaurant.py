@@ -37,6 +37,7 @@ class TableSession(Base):
     customer_name: Mapped[str | None] = mapped_column(String(200))
     guest_count: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(30), default="active")  # active / requesting_bill / closed / cancelled
+    service_type: Mapped[str] = mapped_column(String(20), default="dine_in")  # dine_in / delivery / takeout
     notes: Mapped[str | None] = mapped_column(Text)
     sale_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sales.id"))
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

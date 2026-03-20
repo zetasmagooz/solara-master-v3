@@ -239,6 +239,7 @@ def _session_response(session) -> dict:
         "customer_name": session.customer_name,
         "guest_count": session.guest_count,
         "status": session.status,
+        "service_type": session.service_type or "dine_in",
         "notes": session.notes,
         "sale_id": session.sale_id,
         "opened_at": session.opened_at,

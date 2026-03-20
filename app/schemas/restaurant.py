@@ -28,6 +28,7 @@ class RestaurantTableUpdate(BaseModel):
 class TableSessionBrief(BaseModel):
     id: UUID
     status: str
+    service_type: str = "dine_in"
     guest_count: int
     customer_name: str | None = None
     opened_at: datetime
@@ -103,11 +104,12 @@ class TableOrderResponse(BaseModel):
 
 class OpenSessionRequest(BaseModel):
     store_id: UUID
-    table_ids: list[UUID]
+    table_ids: list[UUID] = []
     customer_id: UUID | None = None
     customer_name: str | None = None
     guest_count: int = 1
     notes: str | None = None
+    service_type: str = "dine_in"  # dine_in, delivery, takeout
 
 
 class TableSessionResponse(BaseModel):
@@ -118,6 +120,7 @@ class TableSessionResponse(BaseModel):
     customer_name: str | None = None
     guest_count: int
     status: str
+    service_type: str = "dine_in"
     notes: str | None = None
     sale_id: UUID | None = None
     opened_at: datetime
