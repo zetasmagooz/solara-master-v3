@@ -85,7 +85,7 @@ class OptimizedAIEngine:
             api_key=api_key,
             default_model=default_model,
             timeout=30.0,
-            enable_cache=True,
+            enable_cache=False,
         )
 
         self.catalog = get_dynamic_catalog()
@@ -225,28 +225,7 @@ class OptimizedAIEngine:
                     start_time=start_time,
                 )
 
-            # SQL analytics flow — check ask-level cache first
-            def _normalize_q(q: str) -> str:
-                q = q.lower().strip()
-                q = unicodedata.normalize('NFD', q)
-                return ''.join(c for c in q if not unicodedata.combining(c))
-
-            cache_key = hashlib.md5(
-                f"{_normalize_q(question)}:{store_id}:{datetime.now().strftime('%Y-%m-%d')}".encode()
-            ).hexdigest()
-
-            if cache_key in self._ask_cache:
-                cached, ts = self._ask_cache[cache_key]
-                if (datetime.now() - ts).total_seconds() < 300:  # 5 min TTL
-                    import copy
-                    result = copy.deepcopy(cached)
-                    result["ai_history"]["latency_seconds"] = 0.01
-                    result["ai_history"]["cached"] = True
-                    logger.info(f"[CACHE HIT] ask-level cache for: {question[:50]}")
-                    return result
-                else:
-                    del self._ask_cache[cache_key]
-
+            # SQL analytics flow — NO CACHE: datos siempre en tiempo real
             t0 = datetime.now()
 
             # 1. Detectar intent SQL
@@ -304,10 +283,15 @@ class OptimizedAIEngine:
             sql = sql_result.get("sql", "")
             params = sql_result.get("params", [])
 
+            logger.info(f"[DEBUG-AI] store_id={store_id}")
+            logger.info(f"[DEBUG-AI] SQL generado: {sql}")
+            logger.info(f"[DEBUG-AI] params: {params}")
+
             if not sql:
                 return self._error_response("consulta válida", usage=usage)
 
             data = await self._execute_sql(sql, params, store_id)
+            logger.info(f"[DEBUG-AI] Resultado: {data}")
 
             t3 = datetime.now()
             logger.info(f"[TIMING] SQL exec: {(t3 - t2).total_seconds():.2f}s")
@@ -368,14 +352,6 @@ class OptimizedAIEngine:
                     "model": self.sql_model,
                 },
             }
-
-            # Guardar en ask-level cache (sin audio para ahorrar memoria)
-            cache_entry = {k: v for k, v in response.items() if k not in ("audio_base64",)}
-            self._ask_cache[cache_key] = (cache_entry, datetime.now())
-            # Limpiar entradas viejas (max 50)
-            if len(self._ask_cache) > 50:
-                oldest_key = min(self._ask_cache, key=lambda k: self._ask_cache[k][1])
-                del self._ask_cache[oldest_key]
 
             return response
 
