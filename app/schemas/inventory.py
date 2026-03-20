@@ -1,5 +1,10 @@
+from enum import Enum
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
+
+# ── Ajustes (legacy — set new_stock absoluto) ──
 
 class AdjustmentItemCreate(BaseModel):
     product_id: str
@@ -31,3 +36,49 @@ class AdjustmentResponse(BaseModel):
     total_items: int
     created_at: str
     items: list[AdjustmentItemResponse]
+
+
+# ── Entradas de inventario (ingreso/egreso/reemplazo) ──
+
+class MovementType(str, Enum):
+    ingreso = "ingreso"
+    egreso = "egreso"
+    reemplazo = "reemplazo"
+
+
+class InventoryEntryItemCreate(BaseModel):
+    product_id: str
+    quantity: float = Field(..., gt=0)
+    unit_cost: float = 0
+    sale_price: float = 0
+
+
+class InventoryEntryCreate(BaseModel):
+    movement_type: MovementType
+    supplier_name: str | None = None
+    notes: str | None = None
+    items: list[InventoryEntryItemCreate] = Field(..., min_length=1)
+
+
+class InventoryEntryItemResponse(BaseModel):
+    product_id: str
+    product_name: str
+    quantity: float
+    unit_cost: float
+    sale_price: float
+    previous_stock: float
+    new_stock: float
+
+
+class InventoryEntryResponse(BaseModel):
+    id: str
+    store_id: str
+    movement_type: str
+    supplier_name: str | None = None
+    notes: str | None = None
+    total_items: int
+    total_cost: float
+    user_id: str | None = None
+    user_name: str | None = None
+    created_at: str
+    items: list[InventoryEntryItemResponse]

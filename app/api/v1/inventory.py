@@ -3,7 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.inventory import AdjustmentCreate, AdjustmentResponse
+from app.schemas.inventory import (
+    AdjustmentCreate,
+    AdjustmentResponse,
+    InventoryEntryCreate,
+    InventoryEntryResponse,
+)
 from app.services.inventory_service import InventoryService
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
@@ -21,6 +26,29 @@ async def create_adjustment(
     service = InventoryService(db)
     try:
         result = await service.create_adjustment(
+            store_id=current_user.default_store_id,
+            user_id=current_user.id,
+            data=data,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result
+
+
+@router.post("/entries", response_model=InventoryEntryResponse, status_code=status.HTTP_201_CREATED)
+async def create_inventory_entry(
+    data: InventoryEntryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Registra un movimiento de inventario (ingreso/egreso/reemplazo)."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    service = InventoryService(db)
+    try:
+        result = await service.create_inventory_entry(
             store_id=current_user.default_store_id,
             user_id=current_user.id,
             data=data,

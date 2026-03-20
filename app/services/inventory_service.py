@@ -9,7 +9,14 @@ from app.models.catalog import Product
 from app.models.inventory import InventoryAdjustment, InventoryAdjustmentItem
 from app.models.user import Person, User
 from app.models.variant import ProductVariant
-from app.schemas.inventory import AdjustmentCreate, AdjustmentItemResponse, AdjustmentResponse
+from app.schemas.inventory import (
+    AdjustmentCreate,
+    AdjustmentItemResponse,
+    AdjustmentResponse,
+    InventoryEntryCreate,
+    InventoryEntryItemResponse,
+    InventoryEntryResponse,
+)
 
 
 class InventoryService:
@@ -229,3 +236,103 @@ class InventoryService:
             "per_page": per_page,
             "pages": math.ceil(total / per_page) if total else 0,
         }
+
+    async def create_inventory_entry(
+        self, store_id: uuid.UUID, user_id: uuid.UUID, data: InventoryEntryCreate
+    ) -> InventoryEntryResponse:
+        """Registra un movimiento de inventario (ingreso/egreso/reemplazo)."""
+        movement = data.movement_type.value
+        reason_map = {
+            "ingreso": "Entrada de inventario",
+            "egreso": "Egreso de inventario",
+            "reemplazo": "Reemplazo de stock",
+        }
+        reason = reason_map.get(movement, movement)
+        if data.supplier_name:
+            reason += f" — {data.supplier_name}"
+        if data.notes:
+            reason += f" | {data.notes}"
+
+        # Crear ajuste padre
+        adjustment = InventoryAdjustment(
+            store_id=store_id,
+            user_id=user_id,
+            reason=reason,
+            total_items=len(data.items),
+        )
+        self.db.add(adjustment)
+        await self.db.flush()
+
+        response_items: list[InventoryEntryItemResponse] = []
+        total_cost = 0.0
+
+        for item in data.items:
+            product_id = uuid.UUID(item.product_id)
+            result = await self.db.execute(
+                select(Product).where(
+                    Product.id == product_id,
+                    Product.store_id == store_id,
+                )
+            )
+            product = result.scalar_one_or_none()
+            if not product:
+                continue
+
+            previous_stock = float(product.stock or 0)
+
+            if movement == "ingreso":
+                new_stock = previous_stock + item.quantity
+            elif movement == "egreso":
+                new_stock = max(0, previous_stock - item.quantity)
+            else:  # reemplazo
+                new_stock = item.quantity
+
+            # Actualizar stock
+            product.stock = new_stock
+
+            # Actualizar precios si se proporcionan
+            if item.unit_cost > 0:
+                product.cost_price = item.unit_cost
+            if item.sale_price > 0:
+                product.base_price = item.sale_price
+
+            # Crear item de ajuste
+            adj_item = InventoryAdjustmentItem(
+                adjustment_id=adjustment.id,
+                product_id=product_id,
+                variant_id=None,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+            )
+            self.db.add(adj_item)
+
+            total_cost += item.quantity * item.unit_cost
+
+            response_items.append(InventoryEntryItemResponse(
+                product_id=str(product_id),
+                product_name=product.name,
+                quantity=item.quantity,
+                unit_cost=item.unit_cost,
+                sale_price=item.sale_price,
+                previous_stock=previous_stock,
+                new_stock=new_stock,
+            ))
+
+        adjustment.total_items = len(response_items)
+        await self.db.flush()
+
+        user_name = await self._get_user_name(user_id)
+
+        return InventoryEntryResponse(
+            id=str(adjustment.id),
+            store_id=str(store_id),
+            movement_type=movement,
+            supplier_name=data.supplier_name,
+            notes=data.notes,
+            total_items=len(response_items),
+            total_cost=total_cost,
+            user_id=str(user_id),
+            user_name=user_name,
+            created_at=adjustment.created_at.isoformat() if adjustment.created_at else datetime.now(timezone.utc).isoformat(),
+            items=response_items,
+        )

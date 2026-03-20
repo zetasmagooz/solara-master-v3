@@ -241,8 +241,9 @@ class WarehouseService:
     async def create_entry(
         self, warehouse_store_id: uuid.UUID, data: dict, user_id: uuid.UUID
     ) -> WarehouseEntry:
-        """Registra una entrada de inventario al almacén."""
+        """Registra un movimiento de inventario al almacén (ingreso/egreso/reemplazo)."""
         items_data = data.pop("items", [])
+        movement_type = data.get("movement_type", "ingreso")
         total_cost = 0.0
         total_items = 0
 
@@ -259,6 +260,7 @@ class WarehouseService:
             product_id = item_data["product_id"]
             quantity = item_data["quantity"]
             unit_cost = item_data.get("unit_cost", 0)
+            sale_price = item_data.get("sale_price", 0)
 
             # Crear item
             entry_item = WarehouseEntryItem(
@@ -269,15 +271,24 @@ class WarehouseService:
             )
             self.db.add(entry_item)
 
-            # Sumar stock del producto en almacén
+            # Ajustar stock según tipo de movimiento
             result = await self.db.execute(
                 select(Product).where(Product.id == product_id)
             )
             product = result.scalar_one_or_none()
             if product:
-                product.stock = float(product.stock or 0) + quantity
+                current_stock = float(product.stock or 0)
+                if movement_type == "egreso":
+                    product.stock = max(0, current_stock - quantity)
+                elif movement_type == "reemplazo":
+                    product.stock = quantity
+                else:  # ingreso
+                    product.stock = current_stock + quantity
+
                 if unit_cost > 0:
                     product.cost_price = unit_cost
+                if sale_price > 0:
+                    product.base_price = sale_price
 
             total_cost += quantity * unit_cost
             total_items += 1

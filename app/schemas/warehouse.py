@@ -10,9 +10,11 @@ class EntryItemCreate(BaseModel):
     product_id: UUID
     quantity: float
     unit_cost: float = 0
+    sale_price: float = 0
 
 
 class EntryCreate(BaseModel):
+    movement_type: str = "ingreso"  # ingreso | egreso | reemplazo
     supplier_name: str | None = None
     notes: str | None = None
     items: list[EntryItemCreate]
