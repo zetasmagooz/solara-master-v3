@@ -1,12 +1,13 @@
 from datetime import date, datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.catalog import Product
+from app.models.catalog import Category, Product, ProductImage
 from app.models.customer import Customer
 from app.models.sale import Payment, Sale, SaleItem
 from app.models.weather import WeatherSnapshot
@@ -471,3 +472,185 @@ class SaleService:
         await self.db.flush()
         await self.db.refresh(sale)
         return sale
+
+    async def get_ia_dashboard_summary(self, store_id: UUID, user_name: str = "") -> dict:
+        """Dashboard summary for the IA screen: today's sales, profit, vs yesterday, top products, and insight."""
+        local_date = func.date(func.timezone("America/Mexico_City", Sale.created_at))
+        mx_now = datetime.now(ZoneInfo("America/Mexico_City"))
+        today = mx_now.date()
+        yesterday = today - timedelta(days=1)
+
+        # ── 1. Ventas hoy (SUM payments.amount + COUNT distinct sales) ──
+        today_stmt = (
+            select(
+                func.coalesce(func.sum(Payment.amount), 0).label("total"),
+                func.count(func.distinct(Sale.id)).label("count"),
+            )
+            .select_from(Payment)
+            .join(Sale, Payment.sale_id == Sale.id)
+            .where(Sale.store_id == store_id, Sale.status != "cancelled", local_date == today)
+        )
+        today_row = (await self.db.execute(today_stmt)).one()
+        sales_today = float(today_row.total)
+        sales_count = int(today_row.count)
+
+        # ── 2. Ventas ayer ──
+        yesterday_stmt = (
+            select(func.coalesce(func.sum(Payment.amount), 0).label("total"))
+            .select_from(Payment)
+            .join(Sale, Payment.sale_id == Sale.id)
+            .where(Sale.store_id == store_id, Sale.status != "cancelled", local_date == yesterday)
+        )
+        sales_yesterday = float((await self.db.execute(yesterday_stmt)).scalar())
+
+        # ── 3. Costo hoy (para utilidad) ──
+        cost_stmt = (
+            select(
+                func.coalesce(func.sum(SaleItem.quantity * func.coalesce(Product.cost_price, 0)), 0).label("cost")
+            )
+            .select_from(SaleItem)
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .outerjoin(Product, Product.id == SaleItem.product_id)
+            .where(Sale.store_id == store_id, Sale.status != "cancelled", local_date == today)
+        )
+        total_cost = float((await self.db.execute(cost_stmt)).scalar())
+
+        # ── 4. Top 3 items hoy (productos + combos) ──
+        item_id_col = func.coalesce(SaleItem.product_id, SaleItem.combo_id).label("item_id")
+        top_stmt = (
+            select(
+                item_id_col,
+                SaleItem.product_id,
+                SaleItem.combo_id,
+                SaleItem.name,
+                func.sum(SaleItem.quantity).label("qty"),
+            )
+            .join(Sale, Sale.id == SaleItem.sale_id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != "cancelled",
+                local_date == today,
+            )
+            .group_by(item_id_col, SaleItem.product_id, SaleItem.combo_id, SaleItem.name)
+            .order_by(func.sum(SaleItem.quantity).desc())
+            .limit(3)
+        )
+        top_rows = (await self.db.execute(top_stmt)).all()
+
+        # Fetch images: products (primary image) + combos (image_url)
+        top_product_ids = [r.product_id for r in top_rows if r.product_id]
+        top_combo_ids = [r.combo_id for r in top_rows if r.combo_id]
+        image_map: dict[UUID, str | None] = {}
+
+        if top_product_ids:
+            img_stmt = (
+                select(ProductImage.product_id, ProductImage.image_url)
+                .where(ProductImage.product_id.in_(top_product_ids), ProductImage.is_primary.is_(True))
+            )
+            img_rows = (await self.db.execute(img_stmt)).all()
+            image_map.update({r.product_id: r.image_url for r in img_rows})
+
+        if top_combo_ids:
+            from app.models.combo import Combo
+            combo_img_stmt = select(Combo.id, Combo.image_url).where(Combo.id.in_(top_combo_ids))
+            combo_img_rows = (await self.db.execute(combo_img_stmt)).all()
+            image_map.update({r.id: r.image_url for r in combo_img_rows})
+
+        top_products = [
+            {
+                "name": r.name,
+                "quantity": int(r.qty),
+                "image_url": image_map.get(r.product_id or r.combo_id),
+            }
+            for r in top_rows
+        ]
+
+        # ── 5. Últimos 7 días de ventas (para sparkline) ──
+        week_start = today - timedelta(days=6)
+        week_stmt = (
+            select(
+                local_date.label("day"),
+                func.coalesce(func.sum(Payment.amount), 0).label("total"),
+            )
+            .select_from(Payment)
+            .join(Sale, Payment.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.status != "cancelled",
+                local_date >= week_start,
+                local_date <= today,
+            )
+            .group_by(local_date)
+            .order_by(local_date)
+        )
+        week_rows = (await self.db.execute(week_stmt)).all()
+        week_map = {r.day: float(r.total) for r in week_rows}
+        daily_sales = [
+            {"date": str(week_start + timedelta(days=i)), "total": round(week_map.get(week_start + timedelta(days=i), 0), 2)}
+            for i in range(7)
+        ]
+
+        # ── Cálculos derivados ──
+        profit_today = sales_today - total_cost
+        profit_margin = (profit_today / sales_today * 100) if sales_today > 0 else 0
+        if sales_yesterday > 0:
+            vs_yesterday_pct = ((sales_today - sales_yesterday) / sales_yesterday) * 100
+        elif sales_today > 0:
+            vs_yesterday_pct = 100.0
+        else:
+            vs_yesterday_pct = 0.0
+        vs_yesterday_amount = sales_today - sales_yesterday
+
+        # ── Insight (template-based, sin LLM) ──
+        insight = self._build_insight(
+            store_id, sales_today, profit_margin, vs_yesterday_pct, top_rows, user_name
+        )
+
+        return {
+            "sales_today": round(sales_today, 2),
+            "sales_yesterday": round(sales_yesterday, 2),
+            "sales_count": sales_count,
+            "profit_today": round(profit_today, 2),
+            "profit_margin": round(profit_margin, 1),
+            "vs_yesterday_pct": round(vs_yesterday_pct, 1),
+            "vs_yesterday_amount": round(vs_yesterday_amount, 2),
+            "top_products": top_products,
+            "daily_sales": daily_sales,
+            "insight": insight,
+        }
+
+    @staticmethod
+    def _build_insight(
+        store_id: UUID,
+        sales_today: float,
+        profit_margin: float,
+        vs_yesterday_pct: float,
+        top_rows: list,
+        user_name: str,
+    ) -> str:
+        if sales_today == 0:
+            return "Aún no hay ventas registradas hoy. ¡Es un buen momento para preparar ofertas!"
+
+        # Motivational message based on comparison
+        if vs_yesterday_pct > 20:
+            motiv = "¡Día excelente"
+            emoji = "🚀"
+        elif vs_yesterday_pct >= 0:
+            motiv = "¡Vas bien"
+            emoji = "💪"
+        else:
+            motiv = "¡Ánimo"
+            emoji = "🔥"
+
+        name_part = f", {user_name}" if user_name else ""
+        motiv_full = f"{motiv}{name_part}! {emoji}"
+
+        # Top product mention
+        top_name = top_rows[0].name if top_rows else "tus productos"
+        top_qty = int(top_rows[0].qty) if top_rows else 0
+
+        parts = [f"💡 Tu producto estrella hoy es {top_name} con {top_qty} vendidos"]
+        parts.append(f"Tu margen es de {profit_margin:.0f}%")
+        parts.append(motiv_full)
+
+        return " • ".join(parts)
