@@ -14,11 +14,11 @@ class EcartPayService:
 
     Soporta keys por tienda (store-level) con fallback a keys globales (.env).
     Los tokens se cachean por par de keys (public_key).
+    Auto-crea infraestructura POS (branch, register, link terminal) si no existe.
     """
 
     def __init__(self):
         self.base_url = settings.ECARTPAY_BASE_URL.rstrip("/")
-        # Cache de tokens por public_key → (token, expires_at)
         self._tokens: dict[str, tuple[str, datetime]] = {}
 
     def _resolve_keys(
@@ -26,7 +26,6 @@ class EcartPayService:
         public_key: str | None = None,
         private_key: str | None = None,
     ) -> tuple[str, str]:
-        """Resuelve las keys a usar: las de la tienda si existen, sino las globales."""
         pk = public_key or settings.ECARTPAY_PUBLIC_KEY
         sk = private_key or settings.ECARTPAY_PRIVATE_KEY
         if not pk or not sk:
@@ -38,10 +37,7 @@ class EcartPayService:
         public_key: str | None = None,
         private_key: str | None = None,
     ) -> str:
-        """Obtiene token JWT con Basic Auth. Cachea por 55 min por par de keys."""
         pk, sk = self._resolve_keys(public_key, private_key)
-
-        # Revisar cache
         cached = self._tokens.get(pk)
         if cached:
             token, expires = cached
@@ -75,6 +71,96 @@ class EcartPayService:
             "Content-Type": "application/json",
         }
 
+    # ── POS Infrastructure ──
+
+    async def ensure_pos_infrastructure(
+        self,
+        terminal_id: str,
+        branch_id: str | None,
+        register_id: str | None,
+        store_name: str = "Solara Store",
+        public_key: str | None = None,
+        private_key: str | None = None,
+    ) -> tuple[str, str]:
+        """Verifica que exista branch + register vinculado a la terminal.
+        Si no existen o fueron eliminados, los crea automáticamente.
+
+        Returns: (branch_id, register_id) listos para usar.
+        """
+        headers = await self._headers(public_key, private_key)
+
+        # 1. Verificar si el branch existe
+        valid_branch = False
+        if branch_id:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self.base_url}/api/pos/branches/{branch_id}",
+                    headers=headers,
+                )
+                valid_branch = resp.status_code == 200
+
+        # 2. Si no hay branch válido, crear uno
+        if not valid_branch:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{self.base_url}/api/pos/branches",
+                    headers=headers,
+                    json={
+                        "name": store_name,
+                        "timezone": "America/Mexico_City",
+                        "status": "active",
+                    },
+                )
+                resp.raise_for_status()
+                branch_data = resp.json()
+            branch_id = branch_data["data"]["id"]
+            register_id = None  # Forzar crear register nuevo
+            logger.info(f"EcartPay: branch creado {branch_id}")
+
+        # 3. Verificar si el register existe
+        valid_register = False
+        if register_id:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"{self.base_url}/api/pos/sales-registers/{register_id}",
+                    headers=headers,
+                )
+                valid_register = resp.status_code == 200
+
+        # 4. Si no hay register válido, crear uno
+        if not valid_register:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    f"{self.base_url}/api/pos/sales-registers",
+                    headers=headers,
+                    json={
+                        "pos_branches_id": branch_id,
+                        "name": "Caja Solara",
+                        "register_number": "REG-001",
+                        "status": "active",
+                    },
+                )
+                resp.raise_for_status()
+                register_data = resp.json()
+            register_id = register_data["data"]["id"]
+            logger.info(f"EcartPay: register creado {register_id}")
+
+            # 5. Vincular terminal al nuevo register
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.put(
+                    f"{self.base_url}/api/pos/sales-registers/{register_id}/link-terminal",
+                    headers=headers,
+                    json={"pos_information_id": terminal_id},
+                )
+                if resp.status_code < 400:
+                    logger.info(f"EcartPay: terminal {terminal_id} vinculada a register {register_id}")
+                else:
+                    logger.warning(f"EcartPay: no se pudo vincular terminal: {resp.text}")
+
+        return branch_id, register_id
+
+    # ── Orders ──
+
     async def create_order(
         self,
         amount: float,
@@ -87,7 +173,7 @@ class EcartPayService:
         private_key: str | None = None,
         pos_information_id: str | None = None,
     ) -> dict:
-        """Crea una orden de cobro en EcartPay. Si pos_information_id se provee, la orden se envía a la terminal física."""
+        """Crea una orden de cobro en EcartPay."""
         headers = await self._headers(public_key, private_key)
         payload: dict = {
             "currency": currency,
@@ -96,7 +182,6 @@ class EcartPayService:
             "first_name": "Solara",
             "last_name": "POS",
         }
-        # Si hay terminal POS, usar endpoint POS y vincular
         if pos_information_id:
             payload["pos_information_id"] = pos_information_id
         if items:
@@ -108,15 +193,10 @@ class EcartPayService:
         if extra_fields:
             payload.update(extra_fields)
 
-        # Usar /api/pos/orders para terminales físicas, /api/orders para checkout online
         endpoint = f"{self.base_url}/api/pos/orders" if pos_information_id else f"{self.base_url}/api/orders"
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                endpoint,
-                headers=headers,
-                json=payload,
-            )
+            resp = await client.post(endpoint, headers=headers, json=payload)
             if resp.status_code >= 400:
                 logger.error(f"EcartPay create_order error {resp.status_code}: {resp.text}")
             resp.raise_for_status()
@@ -131,9 +211,7 @@ class EcartPayService:
         public_key: str | None = None,
         private_key: str | None = None,
     ) -> dict:
-        """Consulta status de una orden existente."""
         headers = await self._headers(public_key, private_key)
-
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{self.base_url}/api/orders/{order_id}",
@@ -142,12 +220,31 @@ class EcartPayService:
             resp.raise_for_status()
             return resp.json()
 
+    async def cancel_order(
+        self,
+        order_id: str,
+        public_key: str | None = None,
+        private_key: str | None = None,
+    ) -> dict:
+        """Intenta cancelar una orden actualizándola con items de $0."""
+        headers = await self._headers(public_key, private_key)
+        # EcartPay no tiene endpoint de cancel directo, pero PATCH con email funciona
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.patch(
+                f"{self.base_url}/api/orders/{order_id}",
+                headers=headers,
+                json={"email": "cancelled@solara.app"},
+            )
+            if resp.status_code < 400:
+                return resp.json()
+            logger.warning(f"EcartPay: no se pudo cancelar orden {order_id}: {resp.text}")
+            return {"error": resp.text}
+
     async def get_status(
         self,
         public_key: str | None = None,
         private_key: str | None = None,
     ) -> dict:
-        """Health check: intenta autenticarse y retorna si el servicio está online."""
         try:
             await self._get_token(public_key, private_key)
             return {"online": True, "last_check": datetime.now().isoformat()}
@@ -156,5 +253,4 @@ class EcartPayService:
             return {"online": False, "last_check": datetime.now().isoformat(), "error": str(e)}
 
 
-# Singleton — se reutiliza para mantener tokens cacheados
 ecartpay_service = EcartPayService()

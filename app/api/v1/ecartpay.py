@@ -90,7 +90,7 @@ async def _get_store_ecartpay(db: AsyncSession, store_id: UUID) -> _StoreEcartPa
 
 @router.post("/create-order", response_model=CreateOrderResponse)
 async def create_order(body: CreateOrderRequest, db: AsyncSession = Depends(get_db)):
-    """Crea una orden de cobro en EcartPay usando las keys de la tienda (o globales como fallback)."""
+    """Crea una orden de cobro en EcartPay. Auto-crea infraestructura POS si fue eliminada."""
     try:
         cfg = await _get_store_ecartpay(db, body.store_id)
 
@@ -99,12 +99,31 @@ async def create_order(body: CreateOrderRequest, db: AsyncSession = Depends(get_
             for it in body.items
         ]
 
-        # Campos extra para POS (branch + register)
         extra = {}
-        if cfg.register_id:
-            extra["pos_sales_registers_id"] = cfg.register_id
-        if cfg.branch_id:
-            extra["pos_branches_id"] = cfg.branch_id
+
+        # Si hay terminal, asegurar que la infraestructura POS exista
+        if cfg.terminal_id:
+            branch_id, register_id = await ecartpay_service.ensure_pos_infrastructure(
+                terminal_id=cfg.terminal_id,
+                branch_id=cfg.branch_id,
+                register_id=cfg.register_id,
+                public_key=cfg.pk,
+                private_key=cfg.sk,
+            )
+            # Si se crearon nuevos IDs, guardarlos en la DB
+            if branch_id != cfg.branch_id or register_id != cfg.register_id:
+                store_cfg = await db.execute(
+                    select(StoreConfig).where(StoreConfig.store_id == body.store_id)
+                )
+                sc = store_cfg.scalar_one_or_none()
+                if sc:
+                    sc.ecartpay_branch_id = branch_id
+                    sc.ecartpay_register_id = register_id
+                    await db.commit()
+                    logger.info(f"EcartPay: infraestructura POS actualizada para store {body.store_id}")
+
+            extra["pos_sales_registers_id"] = register_id
+            extra["pos_branches_id"] = branch_id
 
         result = await ecartpay_service.create_order(
             amount=body.amount,
