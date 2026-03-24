@@ -77,6 +77,7 @@ class Payment(Base):
     reference: Mapped[str | None] = mapped_column(String(200))
     platform: Mapped[str | None] = mapped_column(String(50))
     terminal: Mapped[str | None] = mapped_column(String(20))  # normal, ecartpay (only for card payments)
+    ecartpay_order_id: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
     sale: Mapped[Sale] = relationship(back_populates="payments")

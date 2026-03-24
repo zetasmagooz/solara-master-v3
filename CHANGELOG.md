@@ -1,5 +1,20 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-03-24
+
+### feat: Integración EcartPay Terminal API
+- Nuevo servicio `app/services/ecartpay_service.py` — cliente API con autenticación JWT, caché de token por par de keys, crear/consultar órdenes
+- Nuevo router `app/api/v1/ecartpay.py` — endpoints: POST /ecartpay/create-order, GET /ecartpay/order/{id}, GET /ecartpay/status
+- Webhook handler `POST /webhooks/ecartpay` para recibir notificaciones de cambio de status
+- Campo `ecartpay_order_id` agregado al modelo Payment para vincular pagos con órdenes EcartPay
+- Config global (.env): `ECARTPAY_PUBLIC_KEY`, `ECARTPAY_PRIVATE_KEY`, `ECARTPAY_BASE_URL`, `ECARTPAY_NOTIFY_URL`
+
+### feat: Configuración EcartPay por tienda
+- Campos `ecartpay_public_key`, `ecartpay_private_key`, `ecartpay_enabled` en StoreConfig
+- Endpoints: GET/PATCH `/{store_id}/ecartpay-config` (solo owner)
+- EcartPayService usa keys de la tienda con fallback a keys globales
+- Caché de tokens por par de keys (no interfiere entre tiendas)
+
 ## 2026-03-07
 
 ### feat: Módulo de Suscripciones/Planes

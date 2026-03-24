@@ -90,6 +90,22 @@ class StoreConfigUpdate(BaseModel):
     tax_included: bool | None = None
 
 
+class EcartPayConfigResponse(BaseModel):
+    ecartpay_enabled: bool
+    ecartpay_public_key: str | None = None
+    ecartpay_terminal_id: str | None = None
+    has_private_key: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class EcartPayConfigUpdate(BaseModel):
+    ecartpay_enabled: bool | None = None
+    ecartpay_public_key: str | None = None
+    ecartpay_private_key: str | None = None
+    ecartpay_terminal_id: str | None = None
+
+
 async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
     """Helper para obtener datos de suscripción del owner."""
     org_id = user.organization_id
@@ -431,3 +447,72 @@ async def update_store_config(
 
     await db.flush()
     return config
+
+
+@router.get("/{store_id}/ecartpay-config", response_model=EcartPayConfigResponse)
+async def get_ecartpay_config(
+    store_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Obtener configuración de EcartPay de la tienda. Solo owner."""
+    store_result = await db.execute(select(Store).where(Store.id == store_id))
+    store = store_result.scalar_one_or_none()
+    if not store:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tienda no encontrada")
+    if store.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado")
+
+    result = await db.execute(
+        select(StoreConfig).where(StoreConfig.store_id == store_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = StoreConfig(store_id=store_id)
+        db.add(config)
+        await db.flush()
+
+    return EcartPayConfigResponse(
+        ecartpay_enabled=config.ecartpay_enabled,
+        ecartpay_public_key=config.ecartpay_public_key,
+        ecartpay_terminal_id=config.ecartpay_terminal_id,
+        has_private_key=bool(config.ecartpay_private_key),
+    )
+
+
+@router.patch("/{store_id}/ecartpay-config", response_model=EcartPayConfigResponse)
+async def update_ecartpay_config(
+    store_id: UUID,
+    data: EcartPayConfigUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(require_owner)],
+):
+    """Actualizar configuración de EcartPay. Solo owner."""
+    store_result = await db.execute(select(Store).where(Store.id == store_id))
+    store = store_result.scalar_one_or_none()
+    if not store:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tienda no encontrada")
+    if store.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado")
+
+    result = await db.execute(
+        select(StoreConfig).where(StoreConfig.store_id == store_id)
+    )
+    config = result.scalar_one_or_none()
+    if not config:
+        config = StoreConfig(store_id=store_id)
+        db.add(config)
+        await db.flush()
+
+    updates = data.model_dump(exclude_unset=True)
+    for key, value in updates.items():
+        setattr(config, key, value)
+
+    await db.flush()
+
+    return EcartPayConfigResponse(
+        ecartpay_enabled=config.ecartpay_enabled,
+        ecartpay_public_key=config.ecartpay_public_key,
+        ecartpay_terminal_id=config.ecartpay_terminal_id,
+        has_private_key=bool(config.ecartpay_private_key),
+    )

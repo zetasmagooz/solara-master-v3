@@ -89,6 +89,13 @@ class StoreConfig(Base):
     sales_sequence_prefix: Mapped[str | None] = mapped_column(String(10))
     kiosk_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     kiosk_config: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # EcartPay — keys por tienda
+    ecartpay_public_key: Mapped[str | None] = mapped_column(String(200))
+    ecartpay_private_key: Mapped[str | None] = mapped_column(String(200))
+    ecartpay_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    ecartpay_terminal_id: Mapped[str | None] = mapped_column(String(100))  # pos_information_id de EcartPay
+    ecartpay_register_id: Mapped[str | None] = mapped_column(String(100))  # pos_sales_registers_id
+    ecartpay_branch_id: Mapped[str | None] = mapped_column(String(100))    # pos_branches_id
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
 

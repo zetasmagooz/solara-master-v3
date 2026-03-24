@@ -2,9 +2,11 @@ import logging
 
 import stripe
 from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy import select
 
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.models.sale import Payment
 from app.services.stripe_billing import StripeBillingService
 
 logger = logging.getLogger(__name__)
@@ -55,5 +57,55 @@ async def stripe_webhook(request: Request):
             await db.rollback()
             logger.error(f"Error procesando webhook {event_type}: {e}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook processing error")
+
+    return {"status": "ok"}
+
+
+@router.post("/ecartpay")
+async def ecartpay_webhook(request: Request):
+    """Recibe notificaciones de cambio de status de órdenes EcartPay."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+
+    # EcartPay envía: { "event": "orders.create", "data": { "id": "...", "status": "..." } }
+    event = payload.get("event", "")
+    data = payload.get("data", {})
+    order_id = str(data.get("id", payload.get("id", payload.get("order_id", ""))))
+    order_status = data.get("status", payload.get("status", ""))
+
+    logger.info(f"EcartPay webhook: event={event} order={order_id} status={order_status} payload={payload}")
+
+    if not order_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing order id")
+
+    async with AsyncSessionLocal() as db:
+        try:
+            # Buscar el pago vinculado a esta orden
+            stmt = select(Payment).where(Payment.ecartpay_order_id == order_id)
+            result = await db.execute(stmt)
+            payment = result.scalar_one_or_none()
+
+            if payment:
+                if order_status == "paid":
+                    # Guardar referencia de pago confirmado
+                    payment.reference = f"ecartpay:{order_id}:paid"
+                    logger.info(f"EcartPay: pago {payment.id} confirmado para orden {order_id}")
+                elif order_status in ("cancelled", "expired"):
+                    payment.reference = f"ecartpay:{order_id}:{order_status}"
+                    logger.warning(f"EcartPay: orden {order_id} {order_status} — pago {payment.id}")
+
+                await db.commit()
+            else:
+                logger.warning(f"EcartPay webhook: no se encontró pago para orden {order_id}")
+
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"Error procesando webhook EcartPay: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Webhook processing error",
+            )
 
     return {"status": "ok"}
