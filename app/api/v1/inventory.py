@@ -20,6 +20,7 @@ async def create_adjustment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Crea un ajuste de inventario (merma, corrección, etc.) para productos."""
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -87,6 +88,7 @@ async def list_adjustments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Lista los ajustes de inventario de la tienda con paginación."""
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 

@@ -76,7 +76,8 @@ async def ecartpay_webhook(request: Request):
     order_id = str(data.get("id", payload.get("id", payload.get("order_id", ""))))
     order_status = data.get("status", payload.get("status", ""))
 
-    logger.info(f"EcartPay webhook: event={event} order={order_id} status={order_status} payload={payload}")
+    logger.info(f"[WEBHOOK-ECARTPAY] ← event={event} order={order_id} status={order_status}")
+    logger.info(f"[WEBHOOK-ECARTPAY] ← payload completo: {payload}")
 
     if not order_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing order id")
@@ -92,18 +93,18 @@ async def ecartpay_webhook(request: Request):
                 if order_status == "paid":
                     # Guardar referencia de pago confirmado
                     payment.reference = f"ecartpay:{order_id}:paid"
-                    logger.info(f"EcartPay: pago {payment.id} confirmado para orden {order_id}")
+                    logger.info(f"[WEBHOOK-ECARTPAY] pago {payment.id} CONFIRMADO para orden {order_id}")
                 elif order_status in ("cancelled", "expired"):
                     payment.reference = f"ecartpay:{order_id}:{order_status}"
-                    logger.warning(f"EcartPay: orden {order_id} {order_status} — pago {payment.id}")
+                    logger.warning(f"[WEBHOOK-ECARTPAY] orden {order_id} {order_status} — pago {payment.id}")
 
                 await db.commit()
             else:
-                logger.warning(f"EcartPay webhook: no se encontró pago para orden {order_id}")
+                logger.warning(f"[WEBHOOK-ECARTPAY] no se encontró pago vinculado para orden {order_id} (normal si la venta aún no se registró)")
 
         except Exception as e:
             await db.rollback()
-            logger.error(f"Error procesando webhook EcartPay: {e}")
+            logger.error(f"[WEBHOOK-ECARTPAY] ERROR procesando: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Webhook processing error",

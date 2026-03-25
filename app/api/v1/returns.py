@@ -31,6 +31,7 @@ async def create_return(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una devolución a partir de una venta existente."""
     service = ReturnService(db)
     sale_return = await service.create_return(data.sale_id, store_id=store_id, user_id=user.id)
     return _to_response(sale_return)
@@ -46,6 +47,7 @@ async def list_returns(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
 ):
+    """Lista las devoluciones de una tienda con paginación y filtro por fechas."""
     service = ReturnService(db)
     returns = await service.get_returns(store_id, limit=limit, offset=offset, date_from=date_from, date_to=date_to)
     return [_to_response(r) for r in returns]
@@ -57,6 +59,7 @@ async def get_return(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de una devolución por su ID."""
     service = ReturnService(db)
     sale_return = await service.get_return(return_id)
     if not sale_return:

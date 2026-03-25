@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class InventoryMovement(Base):
+    """Movimiento de inventario de un insumo. Tipo entrada, salida o ajuste con stock anterior y nuevo."""
     __tablename__ = "inventory_movements"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -24,6 +25,7 @@ class InventoryMovement(Base):
 
 
 class InventoryAdjustment(Base):
+    """Ajuste masivo de inventario. Agrupa varios ítems ajustados con un motivo común."""
     __tablename__ = "inventory_adjustments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -35,6 +37,7 @@ class InventoryAdjustment(Base):
 
 
 class InventoryAdjustmentItem(Base):
+    """Línea de un ajuste de inventario. Producto o variante con stock anterior y nuevo."""
     __tablename__ = "inventory_adjustment_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

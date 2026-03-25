@@ -25,6 +25,7 @@ async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todos los usuarios activos ordenados por fecha de creación descendente."""
     result = await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at.desc()))
     return result.scalars().all()
 
@@ -35,6 +36,7 @@ async def get_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene un usuario por su ID. Retorna 404 si no existe."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -49,6 +51,7 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente los datos de un usuario. Recibe solo los campos a modificar."""
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -67,6 +70,7 @@ async def list_store_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todos los usuarios asociados a una tienda específica con su rol."""
     service = UserService(db)
     return await service.list_store_users(store_id)
 
@@ -78,6 +82,7 @@ async def create_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un nuevo usuario para una tienda con rol asignado. Solo owners. Retorna password temporal."""
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede crear usuarios")
 
@@ -124,6 +129,7 @@ async def update_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza datos de un usuario de tienda (nombre, rol, etc.). Solo owners."""
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede editar usuarios")
 
@@ -146,6 +152,7 @@ async def deactivate_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Desactiva (soft delete) un usuario de tienda. Solo owners."""
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede desactivar usuarios")
 
@@ -163,6 +170,7 @@ async def reset_user_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Resetea la contraseña de un usuario de tienda. Solo owners. Retorna nueva password temporal."""
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede resetear contraseñas")
 
@@ -182,6 +190,7 @@ async def change_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Cambia la contraseña del usuario autenticado. Requiere la contraseña actual y la nueva."""
     service = UserService(db)
     try:
         await service.change_password(current_user.id, data.current_password, data.new_password)

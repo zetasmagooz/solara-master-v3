@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class WarehouseEntry(Base):
+    """Entrada de mercancía al almacén. Proveedor, total de ítems, costo total y usuario creador."""
     __tablename__ = "warehouse_entries"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -26,6 +27,7 @@ class WarehouseEntry(Base):
 
 
 class WarehouseEntryItem(Base):
+    """Línea de una entrada de almacén. Producto, cantidad recibida y costo unitario."""
     __tablename__ = "warehouse_entry_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -40,6 +42,7 @@ class WarehouseEntryItem(Base):
 
 
 class WarehouseTransfer(Base):
+    """Transferencia de productos del almacén a una tienda destino. Estado, notas y usuario creador."""
     __tablename__ = "warehouse_transfers"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -58,6 +61,7 @@ class WarehouseTransfer(Base):
 
 
 class WarehouseTransferItem(Base):
+    """Línea de una transferencia de almacén. Producto origen, producto destino y cantidad."""
     __tablename__ = "warehouse_transfer_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

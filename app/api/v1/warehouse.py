@@ -49,6 +49,7 @@ async def activate_warehouse(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Activa el almacén central para la organización del usuario (requiere 2+ tiendas)."""
     result = await db.execute(
         select(Organization).where(
             Organization.owner_id == current_user.id,
@@ -91,6 +92,7 @@ async def get_dashboard(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Obtiene el dashboard del almacén con resumen de stock, entradas y transferencias."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     return await service.get_dashboard(warehouse_store_id)
@@ -104,6 +106,7 @@ async def create_entry(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Registra una entrada de productos al almacén central."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     entry = await service.create_entry(
@@ -119,6 +122,7 @@ async def list_entries(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
+    """Lista las entradas de productos al almacén con paginación."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     result = await service.get_entries(warehouse_store_id, page, per_page)
@@ -132,6 +136,7 @@ async def get_entry(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Obtiene el detalle de una entrada específica del almacén."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     entry = await service.get_entry(entry_id)
@@ -148,6 +153,7 @@ async def create_transfer(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Crea una transferencia de productos del almacén a una tienda destino."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
 
     # Verificar que la tienda destino pertenece a la org
@@ -178,6 +184,7 @@ async def list_transfers(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
+    """Lista las transferencias realizadas desde el almacén con paginación."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     result = await service.get_transfers(warehouse_store_id, page, per_page)
@@ -191,6 +198,7 @@ async def get_transfer(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Obtiene el detalle de una transferencia específica del almacén."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     transfer = await service.get_transfer(transfer_id)
@@ -229,6 +237,7 @@ async def get_log(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
+    """Obtiene la bitácora de movimientos del almacén (entradas, transferencias, insumos)."""
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     return await service.get_log(warehouse_store_id, log_type=log_type, page=page, per_page=per_page)

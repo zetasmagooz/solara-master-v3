@@ -1,7 +1,7 @@
 import logging
 from fastapi import WebSocket
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ecartpay")
 
 
 class ConnectionManager:
@@ -15,14 +15,14 @@ class ConnectionManager:
         if order_id not in self._connections:
             self._connections[order_id] = []
         self._connections[order_id].append(ws)
-        logger.info(f"WS: cliente conectado para orden {order_id} ({len(self._connections[order_id])} total)")
+        logger.info(f"[WS] cliente CONECTADO para orden {order_id} ({len(self._connections[order_id])} total)")
 
     def disconnect(self, order_id: str, ws: WebSocket):
         if order_id in self._connections:
             self._connections[order_id] = [c for c in self._connections[order_id] if c is not ws]
             if not self._connections[order_id]:
                 del self._connections[order_id]
-        logger.info(f"WS: cliente desconectado de orden {order_id}")
+        logger.info(f"[WS] cliente DESCONECTADO de orden {order_id}")
 
     async def notify(self, order_id: str, data: dict):
         """Envía mensaje JSON a todos los clientes suscritos a una orden."""
@@ -38,8 +38,11 @@ class ConnectionManager:
         # Limpiar conexiones muertas
         for ws in disconnected:
             self.disconnect(order_id, ws)
-        if clients:
-            logger.info(f"WS: notificación enviada a {len(clients) - len(disconnected)} cliente(s) para orden {order_id}")
+        sent = len(clients) - len(disconnected)
+        if sent > 0:
+            logger.info(f"[WS] notificación ENVIADA a {sent} cliente(s) para orden {order_id} → {data}")
+        elif clients:
+            logger.warning(f"[WS] todos los clientes desconectados para orden {order_id}")
 
 
 ws_manager = ConnectionManager()

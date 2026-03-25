@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Session(Base):
+    """Sesión de usuario. Registra dispositivo, geolocalización, inicio y cierre."""
     __tablename__ = "sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -23,6 +24,7 @@ class Session(Base):
 
 
 class JwtToken(Base):
+    """Token JWT emitido. Access token, refresh token, dispositivo y expiración."""
     __tablename__ = "jwt_tokens"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

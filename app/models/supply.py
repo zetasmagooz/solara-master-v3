@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Supply(Base):
+    """Insumo o materia prima. Unidad de medida, costo, stock actual, perecedero y retornable."""
     __tablename__ = "supplies"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

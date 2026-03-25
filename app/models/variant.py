@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class VariantGroup(Base):
+    """Grupo de variantes (ej. Tamaño, Color). Contenedor de opciones de variante."""
     __tablename__ = "variant_groups"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -20,6 +21,7 @@ class VariantGroup(Base):
 
 
 class VariantOption(Base):
+    """Opción de variante (ej. Chico, Mediano, Grande). Nombre y orden dentro del grupo."""
     __tablename__ = "variant_options"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -31,6 +33,7 @@ class VariantOption(Base):
 
 
 class ProductVariant(Base):
+    """Variante específica de un producto. Precio, SKU, código de barras, stock propio y estado."""
     __tablename__ = "product_variants"
     __table_args__ = (UniqueConstraint("product_id", "variant_option_id"),)
 

@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Combo(Base):
+    """Combo de productos. Precio fijo, imagen, visibilidad en kiosko y lista de ítems incluidos."""
     __tablename__ = "combos"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -25,6 +26,7 @@ class Combo(Base):
 
 
 class ComboItem(Base):
+    """Producto incluido en un combo. Cantidad y si permite elegir variante o modificador."""
     __tablename__ = "combo_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

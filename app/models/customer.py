@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 
 class Customer(Base):
+    """Cliente de la tienda. Datos de contacto, género, fecha de nacimiento y contador de visitas."""
     __tablename__ = "customers"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

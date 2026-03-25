@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 
 class Sale(Base):
+    """Venta registrada. Contiene totales, método de pago, propina, descuento y envío."""
     __tablename__ = "sales"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -47,6 +48,7 @@ class Sale(Base):
 
 
 class SaleItem(Base):
+    """Línea de detalle de una venta. Producto, cantidad, precio unitario, modificadores y descuento."""
     __tablename__ = "sale_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -68,6 +70,7 @@ class SaleItem(Base):
 
 
 class Payment(Base):
+    """Pago asociado a una venta. Soporta efectivo, tarjeta, transferencia y plataformas externas."""
     __tablename__ = "payments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -84,6 +87,7 @@ class Payment(Base):
 
 
 class SaleReturn(Base):
+    """Devolución de una venta. Registra monto reembolsado, método y motivo."""
     __tablename__ = "sale_returns"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -103,6 +107,7 @@ class SaleReturn(Base):
 
 
 class SaleReturnItem(Base):
+    """Línea de detalle de una devolución. Producto devuelto, cantidad y si se reintegró al inventario."""
     __tablename__ = "sale_return_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

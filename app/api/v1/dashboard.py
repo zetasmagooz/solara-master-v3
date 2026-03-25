@@ -18,6 +18,7 @@ async def ia_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Genera un resumen de ventas con insights de IA para el dashboard."""
     # Get user's first name for the insight
     user_name = ""
     if user.person_id:

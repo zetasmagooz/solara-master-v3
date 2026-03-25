@@ -24,6 +24,7 @@ async def register_device(
     data: DeviceRegisterRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Registra un nuevo dispositivo kiosko y retorna su token de acceso."""
     service = KioskService(db)
     device = await service.register_device(store_id, data.device_code, data.device_name, data.device_info)
     result = await service.login_device(data.device_code)
@@ -37,6 +38,7 @@ async def login_device(
     data: DeviceLoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Autentica un dispositivo kiosko por su código."""
     service = KioskService(db)
     result = await service.login_device(data.device_code)
     if not result:
@@ -51,6 +53,7 @@ async def create_kiosk_order(
     data: KioskOrderCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Crea un pedido desde el kiosko self-service."""
     service = KioskService(db)
     return await service.create_kiosk_order(device_id, store_id, data)
 
@@ -60,6 +63,7 @@ async def get_order_status(
     order_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Consulta el status actual de un pedido del kiosko."""
     service = KioskService(db)
     order = await service.get_order_status(order_id)
     if not order:

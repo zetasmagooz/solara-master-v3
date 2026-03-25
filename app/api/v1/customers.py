@@ -28,6 +28,7 @@ async def list_customers(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
 ):
+    """Lista clientes de una tienda con filtros opcionales de búsqueda y estado."""
     service = CustomerService(db)
     return await service.search_customers(
         store_id, search=search, is_active=is_active, limit=limit, offset=offset
@@ -41,6 +42,7 @@ async def create_customer(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un nuevo cliente con todos sus datos."""
     service = CustomerService(db)
     try:
         return await service.create_customer(store_id, data)
@@ -55,6 +57,7 @@ async def quick_create_customer(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un cliente rápido con datos mínimos (nombre y teléfono)."""
     service = CustomerService(db)
     try:
         return await service.create_customer(store_id, data)
@@ -68,6 +71,7 @@ async def get_customer(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene los datos de un cliente por su ID."""
     service = CustomerService(db)
     customer = await service.get_customer(customer_id)
     if not customer:
@@ -81,6 +85,7 @@ async def get_customer_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene estadísticas de compras y actividad de un cliente."""
     service = CustomerService(db)
     customer = await service.get_customer(customer_id)
     if not customer:
@@ -95,6 +100,7 @@ async def update_customer(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente los datos de un cliente."""
     service = CustomerService(db)
     try:
         customer = await service.update_customer(customer_id, data)
@@ -113,6 +119,7 @@ async def upload_customer_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Sube o actualiza la imagen de perfil de un cliente (base64)."""
     host_url = str(request.base_url).rstrip("/")
     service = CustomerService(db)
     try:
@@ -130,6 +137,7 @@ async def delete_customer(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina un cliente por su ID."""
     service = CustomerService(db)
     deleted = await service.delete_customer(customer_id)
     if not deleted:

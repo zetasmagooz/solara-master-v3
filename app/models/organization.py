@@ -11,6 +11,7 @@ from app.database import Base
 
 
 class Organization(Base):
+    """Organización (empresa). Agrupa tiendas bajo un owner, con defaults de impuesto, moneda y módulos premium."""
     __tablename__ = "organizations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

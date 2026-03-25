@@ -17,6 +17,7 @@ async def get_full_catalog(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Obtiene el catálogo completo de una tienda para sincronización del kiosko."""
     service = SyncService(db)
     return await service.get_full_catalog(store_id)
 
@@ -27,5 +28,6 @@ async def get_changes(
     since: Annotated[datetime, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    """Obtiene los cambios del catálogo desde una fecha dada (sync incremental)."""
     service = SyncService(db)
     return await service.get_changes_since(store_id, since)

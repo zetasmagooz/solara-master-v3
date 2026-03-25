@@ -32,6 +32,7 @@ async def create_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva mesa en el restaurante."""
     service = RestaurantService(db)
     table = await service.create_table(data)
     return RestaurantTableResponse.model_validate({
@@ -46,6 +47,7 @@ async def list_tables(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todas las mesas de una tienda con su sesión activa."""
     service = RestaurantService(db)
     return await service.get_tables(store_id)
 
@@ -57,6 +59,7 @@ async def update_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza los datos de una mesa (nombre, capacidad, zona, etc.)."""
     service = RestaurantService(db)
     table = await service.update_table(table_id, data)
     return RestaurantTableResponse.model_validate({
@@ -71,6 +74,7 @@ async def delete_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina (desactiva) una mesa del restaurante."""
     service = RestaurantService(db)
     table = await service.delete_table(table_id)
     return RestaurantTableResponse.model_validate({

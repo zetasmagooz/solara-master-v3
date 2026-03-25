@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class RestaurantTable(Base):
+    """Mesa de restaurante. Número, capacidad, zona y orden de visualización."""
     __tablename__ = "restaurant_tables"
     __table_args__ = (
         UniqueConstraint("store_id", "table_number", name="uq_store_table_number"),
@@ -28,6 +29,7 @@ class RestaurantTable(Base):
 
 
 class TableSession(Base):
+    """Sesión activa de mesa. Cliente, tipo de servicio (dine_in/delivery/takeout), estado y pedidos."""
     __tablename__ = "table_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -48,6 +50,7 @@ class TableSession(Base):
 
 
 class TableSessionTable(Base):
+    """Relación muchos-a-muchos entre sesiones y mesas. Permite unir mesas en una sesión."""
     __tablename__ = "table_session_tables"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -59,6 +62,7 @@ class TableSessionTable(Base):
 
 
 class TableOrder(Base):
+    """Pedido dentro de una sesión de mesa. Número de ronda, mesero, ítems en JSON y subtotal."""
     __tablename__ = "table_orders"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

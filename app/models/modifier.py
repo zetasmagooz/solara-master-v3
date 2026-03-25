@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class ModifierGroup(Base):
+    """Grupo de modificadores (ej. salsas, extras). Tipo de selección, mínimo/máximo y si es obligatorio."""
     __tablename__ = "modifier_groups"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -24,6 +25,7 @@ class ModifierGroup(Base):
 
 
 class ModifierOption(Base):
+    """Opción dentro de un grupo de modificadores. Nombre, precio extra y orden de visualización."""
     __tablename__ = "modifier_options"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -37,6 +39,7 @@ class ModifierOption(Base):
 
 
 class ProductModifierGroup(Base):
+    """Relación producto-grupo de modificadores. Vincula un grupo de modificadores a un producto."""
     __tablename__ = "product_modifier_groups"
     __table_args__ = (UniqueConstraint("product_id", "modifier_group_id"),)
 

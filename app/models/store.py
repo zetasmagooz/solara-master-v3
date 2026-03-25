@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Currency(Base):
+    """Moneda disponible. Código ISO, nombre y símbolo."""
     __tablename__ = "currencies"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -18,6 +19,7 @@ class Currency(Base):
 
 
 class Country(Base):
+    """País. Código ISO, nombre y código telefónico."""
     __tablename__ = "countries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -27,6 +29,7 @@ class Country(Base):
 
 
 class BusinessType(Base):
+    """Tipo de negocio (restaurante, tienda, servicio, etc.). Define plantilla de configuración por giro."""
     __tablename__ = "business_types"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -37,6 +40,7 @@ class BusinessType(Base):
 
 
 class Store(Base):
+    """Tienda o sucursal. Contiene dirección, geolocalización, impuesto, configuración y datos de facturación."""
     __tablename__ = "stores"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -80,6 +84,7 @@ class Store(Base):
 
 
 class StoreConfig(Base):
+    """Configuración específica de una tienda. Impuestos incluidos, venta sin stock, kiosko y llaves EcartPay."""
     __tablename__ = "store_config"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

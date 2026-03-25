@@ -30,6 +30,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(data: RegisterRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+    """Registra un nuevo usuario (owner) con su tienda. Retorna access_token y refresh_token."""
     service = AuthService(db)
     try:
         user, store = await service.register(data)
@@ -46,6 +47,7 @@ async def register(data: RegisterRequest, db: Annotated[AsyncSession, Depends(ge
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+    """Autentica un usuario con email/password. Retorna tokens, registra sesión y auto-asigna trial si aplica."""
     service = AuthService(db)
     try:
         user, auto_detected_store = await service.authenticate(data)
@@ -102,6 +104,7 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(data: RefreshTokenRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+    """Renueva los tokens de acceso usando un refresh_token válido. Retorna nuevos access_token y refresh_token."""
     try:
         payload = decode_token(data.refresh_token)
         if payload.get("type") != "refresh":
@@ -160,6 +163,7 @@ async def switch_store(
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: Annotated[User, Depends(get_current_user)]):
+    """Retorna los datos del usuario autenticado a partir del token JWT."""
     return current_user
 
 
@@ -169,6 +173,7 @@ async def logout(
     reason: Annotated[str | None, Query()] = None,
     user_id: Annotated[str | None, Query()] = None,
 ):
+    """Cierra las sesiones activas del usuario. Recibe user_id y motivo opcional por query params."""
     # Cerrar sesiones activas del usuario
     if user_id:
         try:
@@ -193,5 +198,6 @@ async def logout(
 
 @router.get("/business-types", response_model=list[BusinessTypeResponse])
 async def list_business_types(db: Annotated[AsyncSession, Depends(get_db)]):
+    """Lista todos los tipos de negocio disponibles, ordenados por categoría y nombre."""
     result = await db.execute(select(BusinessType).order_by(BusinessType.category, BusinessType.name))
     return result.scalars().all()

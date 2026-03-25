@@ -152,15 +152,20 @@ class OptimizedAIEngine:
             # ── Verificar si hay una sesión de venta activa ──
             sale_session = self.memory.get_sale_session(user_id, store_id)
             if sale_session:
-                logger.info(f"Sesión de venta activa [state={sale_session.get('state')}], continuando con: {question}")
-                return await self._handle_sale_continuation(
-                    question=question,
-                    session=sale_session,
-                    store_id=store_id,
-                    user_id=user_id,
-                    skip_tts=skip_tts,
-                    start_time=start_time,
-                )
+                # Si la pregunta es claramente una consulta analítica/SQL,
+                # salir de la sesión de venta y procesarla normalmente.
+                if self.intent_detector._is_analytics_query(question.lower()) or self.intent_detector.detect_intent(question):
+                    logger.info(f"Consulta analítica detectada durante sesión de venta, saltando sesión: {question}")
+                else:
+                    logger.info(f"Sesión de venta activa [state={sale_session.get('state')}], continuando con: {question}")
+                    return await self._handle_sale_continuation(
+                        question=question,
+                        session=sale_session,
+                        store_id=store_id,
+                        user_id=user_id,
+                        skip_tts=skip_tts,
+                        start_time=start_time,
+                    )
 
             # ── Verificar si hay una operación pendiente ──
             pending_op = self.memory.get_pending_op(user_id, store_id)

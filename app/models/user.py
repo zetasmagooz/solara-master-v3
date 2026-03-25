@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Person(Base):
+    """Persona física. Datos personales como nombre, apellidos, email, género y fecha de nacimiento."""
     __tablename__ = "persons"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -26,6 +27,7 @@ class Person(Base):
 
 
 class User(Base):
+    """Usuario del sistema. Puede ser owner o empleado, vinculado a una persona y organización."""
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -47,6 +49,7 @@ class User(Base):
 
 
 class Password(Base):
+    """Contraseña hasheada de un usuario. Incluye flag para forzar cambio en primer login."""
     __tablename__ = "passwords"
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
@@ -58,6 +61,7 @@ class Password(Base):
 
 
 class PersonPhone(Base):
+    """Teléfono de una persona. Código de país, número y si es el principal."""
     __tablename__ = "person_phones"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -71,6 +75,7 @@ class PersonPhone(Base):
 
 
 class Role(Base):
+    """Rol del sistema (Administrador, Cajero, Mesero, etc.). Define permisos por defecto en JSON."""
     __tablename__ = "roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -84,6 +89,7 @@ class Role(Base):
 
 
 class UserRolePermission(Base):
+    """Asignación de rol y permisos personalizados a un usuario en una tienda específica."""
     __tablename__ = "user_role_permissions"
     __table_args__ = (UniqueConstraint("user_id", "store_id", "role_id"),)
 

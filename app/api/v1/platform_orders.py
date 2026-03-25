@@ -23,6 +23,7 @@ async def create_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un pedido de plataforma externa (Uber Eats, Rappi, etc.)."""
     service = PlatformOrderService(db)
     return await service.create_order(data, user_id=user.id)
 
@@ -39,6 +40,7 @@ async def list_orders(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ):
+    """Lista pedidos de plataformas con filtros por plataforma, status y fechas."""
     service = PlatformOrderService(db)
     return await service.get_orders(store_id, platform=platform, status=status, date_from=date_from, date_to=date_to, limit=limit, offset=offset)
 
@@ -49,6 +51,7 @@ async def get_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene estadísticas agregadas de pedidos por plataforma."""
     service = PlatformOrderService(db)
     return await service.get_stats(store_id)
 
@@ -59,6 +62,7 @@ async def get_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de un pedido de plataforma por su ID."""
     service = PlatformOrderService(db)
     return await service.get_order(order_id)
 
@@ -70,5 +74,6 @@ async def update_order_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza el status de un pedido de plataforma."""
     service = PlatformOrderService(db)
     return await service.update_status(order_id, data, user_id=user.id)

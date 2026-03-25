@@ -243,6 +243,7 @@ async def create_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva tienda para el owner. Valida límite del plan y hereda defaults de la organización."""
     # Buscar organization del owner para asociar automáticamente
     org = None
     org_id = current_user.organization_id
@@ -311,6 +312,7 @@ async def list_stores(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista las tiendas del usuario. Owners ven todas; empleados solo las activas."""
     query = select(Store).where(Store.owner_id == current_user.id)
     # Non-owners solo ven tiendas activas
     if not current_user.is_owner:
@@ -325,6 +327,7 @@ async def get_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene los datos de una tienda por su ID. Retorna 404 si no existe."""
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
     if not store:
@@ -339,6 +342,7 @@ async def update_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente los datos de una tienda (nombre, dirección, impuestos, etc.). Solo el owner."""
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
     if not store:

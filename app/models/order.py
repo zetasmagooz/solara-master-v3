@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Order(Base):
+    """Pedido (POS o kiosko). Contiene totales, origen, estado y notas."""
     __tablename__ = "orders"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -28,6 +29,7 @@ class Order(Base):
 
 
 class OrderItem(Base):
+    """Línea de detalle de un pedido. Producto, variante, combo, modificadores e insumos removidos."""
     __tablename__ = "order_items"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
