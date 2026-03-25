@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # EcartPay
     ECARTPAY_PUBLIC_KEY: str = ""
     ECARTPAY_PRIVATE_KEY: str = ""
-    ECARTPAY_BASE_URL: str = "https://ecartpay.com"
+    ECARTPAY_BASE_URL: str = "https://sandbox.ecartpay.com"
     ECARTPAY_NOTIFY_URL: str = ""  # URL pública del VPS para webhooks
 
     # DB Timezone

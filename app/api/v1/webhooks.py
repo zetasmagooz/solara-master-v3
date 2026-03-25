@@ -8,6 +8,7 @@ from app.config import settings
 from app.database import AsyncSessionLocal
 from app.models.sale import Payment
 from app.services.stripe_billing import StripeBillingService
+from app.services.ws_manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -107,5 +108,12 @@ async def ecartpay_webhook(request: Request):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Webhook processing error",
             )
+
+    # Notificar a clientes WebSocket conectados
+    await ws_manager.notify(order_id, {
+        "event": event,
+        "order_id": order_id,
+        "status": order_status,
+    })
 
     return {"status": "ok"}
