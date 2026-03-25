@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Plan(Base):
+    """Plan de suscripción. Precio mensual, features en JSON e integración con Stripe."""
     __tablename__ = "plans"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -28,6 +29,7 @@ class Plan(Base):
 
 
 class OrganizationSubscription(Base):
+    """Suscripción de una organización a un plan. Estado (trial/active/expired), fechas de inicio y expiración."""
     __tablename__ = "organization_subscriptions"
     __table_args__ = (
         Index("ix_org_subscriptions_org_id", "organization_id"),

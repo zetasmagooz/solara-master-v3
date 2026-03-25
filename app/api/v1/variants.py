@@ -27,6 +27,14 @@ async def list_variant_groups(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todos los grupos de variantes de una tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/variants/groups?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_variant_groups(store_id)
 
@@ -38,6 +46,16 @@ async def create_variant_group(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un nuevo grupo de variantes (ej: Tamaño, Color).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/variants/groups?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Tamaño"}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_variant_group(store_id, data.name)
 
@@ -49,6 +67,16 @@ async def update_variant_group(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza un grupo de variantes (nombre).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/variants/groups/{group_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Color"}'
+    ```
+    """
     service = CatalogService(db)
     result = await service.update_variant_group(group_id, **data.model_dump(exclude_unset=True))
     if not result:
@@ -62,6 +90,14 @@ async def delete_variant_group(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina un grupo de variantes y sus opciones asociadas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/variants/groups/{group_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_variant_group(group_id):
         raise HTTPException(status_code=404, detail="Variant group not found")
@@ -73,6 +109,16 @@ async def create_variant_option(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva opción dentro de un grupo de variantes (ej: Grande, Mediano).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/variants/options \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"variant_group_id": "uuid-grupo", "name": "Grande"}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_variant_option(**data.model_dump())
 
@@ -83,6 +129,14 @@ async def list_product_variants(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista las variantes configuradas para un producto.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/variants/products/{product_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_product_variants(product_id)
 
@@ -94,6 +148,16 @@ async def create_product_variant(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una variante específica para un producto (SKU, precio, stock).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/variants/products/{product_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"sku": "PROD-GDE-001", "price": 89.00, "stock": 50, "option_ids": ["uuid-opcion"]}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_product_variant(product_id, **data.model_dump())
 
@@ -106,6 +170,16 @@ async def update_product_variant(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza una variante de producto (precio, stock, SKU, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/variants/products/{product_id}/{variant_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"price": 99.00, "stock": 30}'
+    ```
+    """
     service = CatalogService(db)
     result = await service.update_product_variant(variant_id, **data.model_dump(exclude_unset=True))
     if not result:
@@ -120,6 +194,14 @@ async def delete_product_variant(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una variante de un producto.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/variants/products/{product_id}/{variant_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_product_variant(variant_id):
         raise HTTPException(status_code=404, detail="Variant not found")

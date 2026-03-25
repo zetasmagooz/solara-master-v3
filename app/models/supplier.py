@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class Supplier(Base):
+    """Proveedor. Datos de contacto, RFC, dirección y marcas que suministra."""
     __tablename__ = "suppliers"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -29,6 +30,7 @@ class Supplier(Base):
 
 
 class SupplierBrand(Base):
+    """Relación proveedor-marca. Indica qué marcas suministra cada proveedor y cuál es la principal."""
     __tablename__ = "supplier_brands"
     __table_args__ = (UniqueConstraint("supplier_id", "brand_id"),)
 

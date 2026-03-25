@@ -59,7 +59,16 @@ async def ask(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Procesa una pregunta en lenguaje natural.
-    Si include_audio=true, retorna texto inmediato + audio_request_id para polling."""
+    Si include_audio=true, retorna texto inmediato + audio_request_id para polling.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/ai/ask \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"question": "¿Cuánto vendí hoy?", "store_id": "d54c2c80-f76d-4717-be91-5cfbea4cbfff", "include_audio": false}'
+    ```
+    """
     try:
         engine = get_ai_engine()
         logger.info(f"[AI/ASK] question={body.question[:50]!r}, include_audio={body.include_audio}")
@@ -131,7 +140,14 @@ async def get_audio(
     response: Response,
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Polling de audio TTS. Retorna audio si listo, 202 si procesando."""
+    """Polling de audio TTS. Retorna audio si listo, 202 si procesando.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/ai/audio/{request_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     engine = get_ai_engine()
     audio_data = engine.get_audio(request_id)
 
@@ -151,7 +167,14 @@ async def clear_context(
     store_id: str,
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Limpia contexto de memoria del usuario."""
+    """Limpia contexto de memoria del usuario.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/ai/clear-context?user_id=uuid-usuario&store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     try:
         engine = get_ai_engine()
         return engine.clear_context(user_id, store_id)
@@ -164,7 +187,14 @@ async def clear_context(
 async def get_stats(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Estadísticas del motor IA."""
+    """Estadísticas del motor IA.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/ai/stats \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     try:
         engine = get_ai_engine()
         return engine.get_stats()
@@ -174,7 +204,13 @@ async def get_stats(
 
 @router.get("/health")
 async def health_check():
-    """Health check del servicio IA."""
+    """Health check del servicio IA.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/ai/health
+    ```
+    """
     try:
         engine = get_ai_engine()
         return {

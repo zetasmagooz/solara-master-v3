@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class PlatformOrder(Base):
+    """Pedido de plataforma externa (Uber, DiDi, Rappi). Estado, datos del cliente y seguimiento."""
     __tablename__ = "platform_orders"
     __table_args__ = (
         Index("ix_platform_orders_store_status", "store_id", "status"),
@@ -37,6 +38,7 @@ class PlatformOrder(Base):
 
 
 class PlatformOrderStatusLog(Base):
+    """Historial de cambios de estado de un pedido de plataforma. Estado anterior, nuevo y quién lo cambió."""
     __tablename__ = "platform_order_status_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

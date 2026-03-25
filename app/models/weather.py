@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class WeatherSnapshot(Base):
+    """Captura del clima al momento de una venta. Temperatura, humedad, viento, nubes y precipitación."""
     __tablename__ = "weather_snapshots"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

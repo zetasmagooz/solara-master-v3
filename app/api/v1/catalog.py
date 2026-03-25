@@ -47,6 +47,14 @@ async def list_categories(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todas las categorías de una tienda con sus subcategorías incluidas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/categories?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_categories(store_id, include_subcategories=True)
 
@@ -59,6 +67,16 @@ async def create_category(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva categoría para una tienda. Soporta imagen en base64.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/categories?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Bebidas", "description": "Refrescos y jugos"}'
+    ```
+    """
     service = CatalogService(db)
     payload = data.model_dump()
     # Handle base64 image
@@ -79,6 +97,16 @@ async def update_category(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente una categoría. Soporta imagen en base64.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/categories/{category_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Bebidas Frías"}'
+    ```
+    """
     service = CatalogService(db)
     payload = data.model_dump(exclude_unset=True)
     if "image_url" in payload and payload["image_url"] and payload["image_url"].startswith("data:"):
@@ -99,6 +127,14 @@ async def delete_category(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una categoría por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/catalog/categories/{category_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_category(category_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
@@ -112,6 +148,16 @@ async def create_subcategory(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva subcategoría asociada a una categoría existente.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/subcategories?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Refrescos", "category_id": "{category_id}"}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_subcategory(store_id, **data.model_dump())
 
@@ -122,6 +168,14 @@ async def list_subcategories(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista las subcategorías de una categoría específica.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/catalog/categories/{category_id}/subcategories \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_subcategories(category_id)
 
@@ -133,6 +187,16 @@ async def update_subcategory(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente una subcategoría. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/subcategories/{subcategory_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Refrescos de Cola"}'
+    ```
+    """
     service = CatalogService(db)
     sub = await service.update_subcategory(subcategory_id, **data.model_dump(exclude_unset=True))
     if not sub:
@@ -146,6 +210,14 @@ async def delete_subcategory(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una subcategoría por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/catalog/subcategories/{subcategory_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_subcategory(subcategory_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subcategory not found")
@@ -158,6 +230,14 @@ async def list_brands(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todas las marcas de una tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/brands?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_brands(store_id)
 
@@ -170,6 +250,16 @@ async def create_brand(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva marca para una tienda. Soporta imagen en base64.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/brands?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Coca Cola"}'
+    ```
+    """
     service = CatalogService(db)
     payload = data.model_dump()
     # Handle base64 image if provided
@@ -191,6 +281,14 @@ async def get_brand(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene una marca por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/catalog/brands/{brand_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     brand = await service.get_brand(brand_id)
     if not brand:
@@ -206,6 +304,16 @@ async def update_brand(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente una marca. Soporta imagen en base64.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/brands/{brand_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Coca-Cola Company"}'
+    ```
+    """
     service = CatalogService(db)
     payload = data.model_dump(exclude_unset=True)
     # Handle base64 image if provided
@@ -227,6 +335,14 @@ async def delete_brand(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una marca por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/catalog/brands/{brand_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_brand(brand_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Brand not found")
@@ -240,6 +356,14 @@ async def trending_products(
     _: Annotated[User, Depends(get_current_user)],
     limit: int = Query(10, ge=1, le=50),
 ):
+    """Retorna los IDs de los productos mas vendidos de una tienda, ordenados por popularidad.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/products/trending?store_id={store_id}&limit=10" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_trending_ids(store_id, limit=limit)
 
@@ -259,6 +383,14 @@ async def list_products(
     is_favorite: bool | None = None,
     subcategory_id: UUID | None = None,
 ):
+    """Lista productos paginados con filtros opcionales (busqueda, categoria, marca, stock bajo, favoritos).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/products?store_id={store_id}&page=1&per_page=20&search=coca" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_products_paginated(
         store_id,
@@ -281,6 +413,22 @@ async def create_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un nuevo producto para una tienda. Soporta atributos opcionales (talla, color, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/products?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "name": "Coca Cola 600ml",
+        "price": 25.00,
+        "cost": 18.50,
+        "stock": 50,
+        "category_id": "{category_id}"
+      }'
+    ```
+    """
     service = CatalogService(db)
     payload = data.model_dump()
     attributes_data = [a.model_dump() for a in data.attributes] if data.attributes else []
@@ -294,7 +442,14 @@ async def create_product(
 # --- Bulk Import ---
 @router.get("/products/import-template")
 async def download_import_template():
-    """Generate and download Excel template for bulk product import."""
+    """Genera y descarga una plantilla Excel para importacion masiva de productos.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/catalog/products/import-template \\
+      -o plantilla_productos.xlsx
+    ```
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -408,7 +563,22 @@ async def bulk_import_products(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Bulk import products from parsed Excel data."""
+    """Importa productos masivamente desde datos parseados de Excel. Opcionalmente genera imagenes con IA.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/products/bulk-import?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "products": [
+          {"name": "Coca Cola 600ml", "price": 25.00, "stock": 50},
+          {"name": "Pepsi 600ml", "price": 22.00, "stock": 30}
+        ],
+        "generate_images": false
+      }'
+    ```
+    """
     service = CatalogService(db)
     host_url = str(request.base_url).rstrip("/")
     rows = [r.model_dump() for r in data.products]
@@ -443,6 +613,14 @@ async def get_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene un producto por su ID con imagenes y atributos. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/catalog/products/{product_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     product = await service.get_product(product_id)
     if not product:
@@ -457,6 +635,16 @@ async def update_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente un producto (nombre, precio, stock, etc.). Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/products/{product_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"price": 30.00, "stock": 100}'
+    ```
+    """
     service = CatalogService(db)
     product = await service.update_product(product_id, **data.model_dump(exclude_unset=True))
     if not product:
@@ -470,6 +658,14 @@ async def delete_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina un producto por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/catalog/products/{product_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_product(product_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
@@ -481,6 +677,14 @@ async def toggle_product_favorite(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Alterna el estado de favorito de un producto. Retorna el producto actualizado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/products/{product_id}/favorite \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     try:
         return await service.toggle_favorite(product_id)
@@ -495,6 +699,16 @@ async def upsert_product_attributes(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea o reemplaza los atributos de un producto (talla, color, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PUT http://66.179.92.115:8005/api/v1/catalog/products/{product_id}/attributes \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '[{"definition_id": "{attr_def_id}", "value": "Grande"}]'
+    ```
+    """
     service = CatalogService(db)
     attrs = [a.model_dump() for a in data]
     return await service.set_product_attributes(product_id, attrs)
@@ -509,6 +723,16 @@ async def upload_product_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Sube una imagen en base64 para un producto. Puede marcarse como imagen principal.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/catalog/products/{product_id}/images \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"base64_data": "data:image/jpeg;base64,/9j/4AAQ...", "is_primary": true}'
+    ```
+    """
     service = CatalogService(db)
     product = await service.get_product(product_id)
     if not product:
@@ -527,6 +751,14 @@ async def generate_product_image_endpoint(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Genera una imagen con IA para un producto a partir de su nombre y descripcion.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/catalog/products/{product_id}/generate-image \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     product = await service.get_product(product_id)
     if not product:
@@ -549,6 +781,14 @@ async def delete_product_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una imagen de producto por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/catalog/product-images/{image_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_product_image(image_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
@@ -561,6 +801,16 @@ async def update_product_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza una imagen de producto (ej. establecerla como principal).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/product-images/{image_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"is_primary": true}'
+    ```
+    """
     service = CatalogService(db)
     if data.is_primary:
         image = await service.set_primary_image(image_id)
@@ -578,6 +828,14 @@ async def list_attribute_definitions(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista las definiciones de atributos de una tienda (talla, color, material, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/attribute-definitions?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_attribute_definitions(store_id)
 
@@ -589,6 +847,16 @@ async def create_attribute_definition(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva definicion de atributo para una tienda (nombre, tipo, opciones).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/attribute-definitions?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Talla", "type": "select", "options": ["S", "M", "L", "XL"]}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_attribute_definition(store_id, **data.model_dump())
 
@@ -600,6 +868,16 @@ async def update_attribute_definition(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza una definicion de atributo existente. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/catalog/attribute-definitions/{definition_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Talla Ropa", "options": ["XS", "S", "M", "L", "XL"]}'
+    ```
+    """
     service = CatalogService(db)
     ad = await service.update_attribute_definition(definition_id, **data.model_dump(exclude_unset=True))
     if not ad:

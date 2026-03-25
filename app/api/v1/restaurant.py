@@ -32,7 +32,16 @@ async def create_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Crea una nueva mesa en el restaurante."""
+    """Crea una nueva mesa en el restaurante.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/restaurant/tables/ \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"store_id": "d54c2c80-f76d-4717-be91-5cfbea4cbfff", "table_number": 5, "name": "Mesa 5", "capacity": 4, "zone": "terraza"}'
+    ```
+    """
     service = RestaurantService(db)
     table = await service.create_table(data)
     return RestaurantTableResponse.model_validate({
@@ -47,7 +56,14 @@ async def list_tables(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Lista todas las mesas de una tienda con su sesión activa."""
+    """Lista todas las mesas de una tienda con su sesión activa.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/restaurant/tables/?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     return await service.get_tables(store_id)
 
@@ -59,7 +75,16 @@ async def update_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza los datos de una mesa (nombre, capacidad, zona, etc.)."""
+    """Actualiza los datos de una mesa (nombre, capacidad, zona, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/restaurant/tables/{table_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Mesa VIP", "capacity": 6, "zone": "interior"}'
+    ```
+    """
     service = RestaurantService(db)
     table = await service.update_table(table_id, data)
     return RestaurantTableResponse.model_validate({
@@ -74,7 +99,14 @@ async def delete_table(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Elimina (desactiva) una mesa del restaurante."""
+    """Elimina (desactiva) una mesa del restaurante.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/restaurant/tables/{table_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     table = await service.delete_table(table_id)
     return RestaurantTableResponse.model_validate({
@@ -92,6 +124,16 @@ async def open_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Abre una nueva sesión (cuenta) en una mesa.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/restaurant/sessions/ \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"store_id": "d54c2c80-f76d-4717-be91-5cfbea4cbfff", "table_ids": ["uuid-mesa"], "guest_count": 3, "customer_name": "Carlos"}'
+    ```
+    """
     service = RestaurantService(db)
     session = await service.open_session(data, user_id=user.id)
     return _session_response(session)
@@ -104,6 +146,14 @@ async def list_sessions(
     _: Annotated[User, Depends(get_current_user)],
     status: str | None = Query(default=None),
 ):
+    """Lista las sesiones activas de una tienda, con filtro opcional por estado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/restaurant/sessions/?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff&status=open" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     sessions = await service.get_active_sessions(store_id, status=status)
     return [_session_response(s) for s in sessions]
@@ -115,6 +165,14 @@ async def get_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de una sesión con sus órdenes y mesas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     session = await service.get_session(session_id)
     return _session_response(session)
@@ -126,6 +184,14 @@ async def close_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Cierra una sesión de mesa (marca como lista para cobro).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/close \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     session = await service.close_session(session_id)
     return _session_response(session)
@@ -137,6 +203,14 @@ async def cancel_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Cancela una sesión de mesa y libera las mesas asociadas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/cancel \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     session = await service.cancel_session(session_id)
     return _session_response(session)
@@ -152,6 +226,16 @@ async def add_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Agrega una orden (pedido) a una sesión de mesa.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/orders \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"guest_label": "Invitado 1", "items_json": [{"product_id": "uuid", "name": "Tacos", "quantity": 2, "price": 45.00}], "notes": "Sin cebolla"}'
+    ```
+    """
     service = RestaurantService(db)
     return await service.add_order(session_id, data)
 
@@ -163,6 +247,16 @@ async def update_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza una orden existente (items, notas, estado).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/restaurant/orders/{order_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"notes": "Extra salsa", "status": "preparing"}'
+    ```
+    """
     service = RestaurantService(db)
     return await service.update_order(order_id, data)
 
@@ -173,6 +267,14 @@ async def delete_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina una orden de una sesión de mesa.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/restaurant/orders/{order_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     await service.delete_order(order_id)
 
@@ -187,6 +289,14 @@ async def add_table_to_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Agrega una mesa adicional a una sesión existente (juntar mesas).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/tables/{table_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     session = await service.add_table_to_session(session_id, table_id)
     return _session_response(session)
@@ -199,6 +309,14 @@ async def remove_table_from_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Remueve una mesa de una sesión (separar mesas).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/tables/{table_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     session = await service.remove_table_from_session(session_id, table_id)
     return _session_response(session)
@@ -213,6 +331,14 @@ async def get_checkout_data(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, require_permission("restaurante:cobrar")],
 ):
+    """Obtiene los datos de checkout de una sesión para procesarla como venta.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/checkout-data \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RestaurantService(db)
     return await service.convert_session_to_sale_data(session_id)
 
@@ -224,6 +350,16 @@ async def finalize_session(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, require_permission("restaurante:cobrar")],
 ):
+    """Finaliza una sesión vinculándola a una venta ya cobrada.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/restaurant/sessions/{session_id}/finalize \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"sale_id": "uuid-venta"}'
+    ```
+    """
     service = RestaurantService(db)
     session = await service.finalize_session(session_id, data.sale_id)
     return _session_response(session)

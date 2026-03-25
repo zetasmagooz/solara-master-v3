@@ -17,7 +17,16 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 @router.post("/stripe")
 async def stripe_webhook(request: Request):
-    """Recibe eventos de Stripe (invoice.paid, subscription.updated, etc.)."""
+    """Recibe eventos de Stripe (invoice.paid, subscription.updated, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/webhooks/stripe \\
+      -H "Content-Type: application/json" \\
+      -H "stripe-signature: {signature}" \\
+      -d '{"type": "invoice.payment_succeeded", "data": {"object": {...}}}'
+    ```
+    """
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature")
 
@@ -64,7 +73,15 @@ async def stripe_webhook(request: Request):
 
 @router.post("/ecartpay")
 async def ecartpay_webhook(request: Request):
-    """Recibe notificaciones de cambio de status de órdenes EcartPay."""
+    """Recibe notificaciones de cambio de status de ordenes EcartPay.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/webhooks/ecartpay \\
+      -H "Content-Type: application/json" \\
+      -d '{"event": "orders.create", "data": {"id": "ord_123", "status": "paid"}}'
+    ```
+    """
     try:
         payload = await request.json()
     except Exception:

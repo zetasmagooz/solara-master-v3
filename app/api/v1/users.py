@@ -25,7 +25,14 @@ async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Lista todos los usuarios activos ordenados por fecha de creación descendente."""
+    """Lista todos los usuarios activos ordenados por fecha de creación descendente.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/users/ \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at.desc()))
     return result.scalars().all()
 
@@ -36,7 +43,14 @@ async def get_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Obtiene un usuario por su ID. Retorna 404 si no existe."""
+    """Obtiene un usuario por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/users/{user_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -51,7 +65,16 @@ async def update_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza parcialmente los datos de un usuario. Recibe solo los campos a modificar."""
+    """Actualiza parcialmente los datos de un usuario. Recibe solo los campos a modificar.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/users/{user_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"username": "nuevo_username"}'
+    ```
+    """
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
@@ -70,7 +93,14 @@ async def list_store_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Lista todos los usuarios asociados a una tienda específica con su rol."""
+    """Lista todos los usuarios asociados a una tienda específica con su rol.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/users/store/{store_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = UserService(db)
     return await service.list_store_users(store_id)
 
@@ -82,7 +112,22 @@ async def create_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Crea un nuevo usuario para una tienda con rol asignado. Solo owners. Retorna password temporal."""
+    """Crea un nuevo usuario para una tienda con rol asignado. Solo owners. Retorna password temporal.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/users/store/{store_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "first_name": "Carlos",
+        "last_name": "López",
+        "username": "carlos.lopez",
+        "role_id": 2,
+        "email": "carlos@example.com"
+      }'
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede crear usuarios")
 
@@ -129,7 +174,16 @@ async def update_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza datos de un usuario de tienda (nombre, rol, etc.). Solo owners."""
+    """Actualiza datos de un usuario de tienda (nombre, rol, etc.). Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/users/store/{store_id}/{user_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"first_name": "Carlos", "role_id": 3}'
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede editar usuarios")
 
@@ -152,7 +206,14 @@ async def deactivate_store_user(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Desactiva (soft delete) un usuario de tienda. Solo owners."""
+    """Desactiva (soft delete) un usuario de tienda. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/users/store/{store_id}/{user_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede desactivar usuarios")
 
@@ -170,7 +231,14 @@ async def reset_user_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Resetea la contraseña de un usuario de tienda. Solo owners. Retorna nueva password temporal."""
+    """Resetea la contraseña de un usuario de tienda. Solo owners. Retorna nueva password temporal.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/users/store/{store_id}/{user_id}/reset-password \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede resetear contraseñas")
 
@@ -190,7 +258,16 @@ async def change_password(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Cambia la contraseña del usuario autenticado. Requiere la contraseña actual y la nueva."""
+    """Cambia la contraseña del usuario autenticado. Requiere la contraseña actual y la nueva.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/users/change-password \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"current_password": "oldPass123", "new_password": "newPass456"}'
+    ```
+    """
     service = UserService(db)
     try:
         await service.change_password(current_user.id, data.current_password, data.new_password)

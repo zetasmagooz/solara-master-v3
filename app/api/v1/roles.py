@@ -17,7 +17,14 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 async def get_permissions_catalog(
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Retorna el catálogo de permisos disponibles agrupados por módulo con sus acciones."""
+    """Retorna el catálogo de permisos disponibles agrupados por módulo con sus acciones.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/roles/permissions \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     modules = []
     for module_key, module_data in PERMISSION_MODULES.items():
         actions = [
@@ -39,7 +46,14 @@ async def list_roles(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Lista todos los roles de una tienda, incluyendo los de sistema y personalizados."""
+    """Lista todos los roles de una tienda, incluyendo los de sistema y personalizados.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/roles/{store_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = RoleService(db)
     return await service.list_roles(store_id)
 
@@ -51,7 +65,20 @@ async def create_role(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Crea un nuevo rol personalizado con permisos para una tienda. Solo owners."""
+    """Crea un nuevo rol personalizado con permisos para una tienda. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/roles/{store_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "name": "Supervisor",
+        "description": "Rol de supervisor",
+        "permissions": ["pos:cobrar", "inventario:ver"]
+      }'
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede crear roles")
 
@@ -70,7 +97,16 @@ async def update_role(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza nombre, descripción o permisos de un rol existente. Solo owners."""
+    """Actualiza nombre, descripción o permisos de un rol existente. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/roles/{store_id}/{role_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Supervisor Senior", "permissions": ["pos:cobrar", "inventario:ver", "inventario:editar"]}'
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede editar roles")
 
@@ -88,7 +124,14 @@ async def delete_role(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Elimina un rol personalizado de una tienda. No permite eliminar roles de sistema. Solo owners."""
+    """Elimina un rol personalizado de una tienda. No permite eliminar roles de sistema. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/roles/{store_id}/{role_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo el propietario puede eliminar roles")
 

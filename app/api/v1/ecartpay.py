@@ -90,7 +90,22 @@ async def _get_store_ecartpay(db: AsyncSession, store_id: UUID) -> _StoreEcartPa
 
 @router.post("/create-order", response_model=CreateOrderResponse)
 async def create_order(body: CreateOrderRequest, db: AsyncSession = Depends(get_db)):
-    """Crea una orden de cobro en EcartPay. Auto-crea infraestructura POS si fue eliminada."""
+    """Crea una orden de cobro en EcartPay. Auto-crea infraestructura POS si fue eliminada.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/ecartpay/create-order \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "store_id": "{store_id}",
+        "amount": 150.00,
+        "currency": "MXN",
+        "items": [{"name": "Coca Cola", "quantity": 2, "unit_price": 25.00}],
+        "sale_id": "{sale_id}",
+        "reference": "VENTA-001"
+      }'
+    ```
+    """
     try:
         cfg = await _get_store_ecartpay(db, body.store_id)
 
@@ -183,7 +198,13 @@ async def get_order_status(
     store_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Consulta el status de una orden en EcartPay."""
+    """Consulta el status de una orden en EcartPay.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/ecartpay/order/{ecartpay_order_id}?store_id={store_id}"
+    ```
+    """
     try:
         cfg = await _get_store_ecartpay(db, store_id) if store_id else _StoreEcartPay()
 
@@ -208,7 +229,13 @@ async def get_ecartpay_status(
     store_id: UUID | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Health check: verifica si EcartPay está disponible (con keys de la tienda o globales)."""
+    """Health check: verifica si EcartPay esta disponible (con keys de la tienda o globales).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/ecartpay/status?store_id={store_id}"
+    ```
+    """
     cfg = await _get_store_ecartpay(db, store_id) if store_id else _StoreEcartPay()
 
     result = await ecartpay_service.get_status(public_key=cfg.pk, private_key=cfg.sk)

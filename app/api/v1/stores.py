@@ -195,7 +195,14 @@ async def get_subscription_info(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_owner)],
 ):
-    """Info de suscripción para modales y pantalla Mi Suscripción."""
+    """Info de suscripción para modales y pantalla Mi Suscripción.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/subscription-info \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     data = await _get_subscription_data(db, current_user)
     if not data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontró suscripción activa")
@@ -207,7 +214,14 @@ async def get_stores_activity_today(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_owner)],
 ):
-    """Retorna dict {store_id: bool} indicando si hubo al menos una sesión hoy por tienda."""
+    """Retorna dict {store_id: bool} indicando si hubo al menos una sesión hoy por tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/activity-today \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     from datetime import datetime, timedelta, timezone
 
     # UTC-6 para México Central
@@ -243,7 +257,23 @@ async def create_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Crea una nueva tienda para el owner. Valida límite del plan y hereda defaults de la organización."""
+    """Crea una nueva tienda para el owner. Valida límite del plan y hereda defaults de la organización.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/stores/ \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "name": "Sucursal Centro",
+        "description": "Sucursal en el centro",
+        "business_type_id": 1,
+        "tax_rate": 16.0,
+        "city": "CDMX",
+        "state": "CDMX"
+      }'
+    ```
+    """
     # Buscar organization del owner para asociar automáticamente
     org = None
     org_id = current_user.organization_id
@@ -312,7 +342,14 @@ async def list_stores(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Lista las tiendas del usuario. Owners ven todas; empleados solo las activas."""
+    """Lista las tiendas del usuario. Owners ven todas; empleados solo las activas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/ \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     query = select(Store).where(Store.owner_id == current_user.id)
     # Non-owners solo ven tiendas activas
     if not current_user.is_owner:
@@ -327,7 +364,14 @@ async def get_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Obtiene los datos de una tienda por su ID. Retorna 404 si no existe."""
+    """Obtiene los datos de una tienda por su ID. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/{store_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
     if not store:
@@ -342,7 +386,16 @@ async def update_store(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza parcialmente los datos de una tienda (nombre, dirección, impuestos, etc.). Solo el owner."""
+    """Actualiza parcialmente los datos de una tienda (nombre, dirección, impuestos, etc.). Solo el owner.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/stores/{store_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Nuevo Nombre", "tax_rate": 16.0}'
+    ```
+    """
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
     if not store:
@@ -364,7 +417,14 @@ async def toggle_store_active(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_owner)],
 ):
-    """Activar/desactivar una tienda. Solo owners."""
+    """Activar/desactivar una tienda. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/stores/{store_id}/toggle-active \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(select(Store).where(Store.id == store_id))
     store = result.scalar_one_or_none()
     if not store:
@@ -408,6 +468,14 @@ async def get_store_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene la configuración de una tienda (ventas sin stock, impuestos incluidos, etc.). Auto-crea si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/{store_id}/config \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(
         select(StoreConfig).where(StoreConfig.store_id == store_id)
     )
@@ -427,6 +495,16 @@ async def update_store_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza la configuración de una tienda. Verifica que el usuario sea owner o pertenezca a la tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/stores/{store_id}/config \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"sales_without_stock": true, "tax_included": false}'
+    ```
+    """
     # Verify store exists and user belongs to it
     store_result = await db.execute(select(Store).where(Store.id == store_id))
     store = store_result.scalar_one_or_none()
@@ -459,7 +537,14 @@ async def get_ecartpay_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
-    """Obtener configuración de EcartPay de la tienda. Solo owner."""
+    """Obtener configuración de EcartPay de la tienda. Solo owner.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/stores/{store_id}/ecartpay-config \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     store_result = await db.execute(select(Store).where(Store.id == store_id))
     store = store_result.scalar_one_or_none()
     if not store:
@@ -491,7 +576,21 @@ async def update_ecartpay_config(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(require_owner)],
 ):
-    """Actualizar configuración de EcartPay. Solo owner."""
+    """Actualizar configuración de EcartPay. Solo owner.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/stores/{store_id}/ecartpay-config \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "ecartpay_enabled": true,
+        "ecartpay_public_key": "pk_live_xxx",
+        "ecartpay_private_key": "sk_live_xxx",
+        "ecartpay_terminal_id": "term_123"
+      }'
+    ```
+    """
     store_result = await db.execute(select(Store).where(Store.id == store_id))
     store = store_result.scalar_one_or_none()
     if not store:

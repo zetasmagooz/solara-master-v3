@@ -18,7 +18,14 @@ async def ia_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    """Genera un resumen de ventas con insights de IA para el dashboard."""
+    """Genera un resumen de ventas con insights de IA para el dashboard.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/dashboard/ia-summary?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     # Get user's first name for the insight
     user_name = ""
     if user.person_id:

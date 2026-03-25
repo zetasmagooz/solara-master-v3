@@ -24,7 +24,15 @@ async def register_device(
     data: DeviceRegisterRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Registra un nuevo dispositivo kiosko y retorna su token de acceso."""
+    """Registra un nuevo dispositivo kiosko y retorna su token de acceso.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/kiosk/auth/register-device?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Content-Type: application/json" \\
+      -d '{"device_code": "KIOSK-001", "device_name": "Kiosko Entrada", "device_info": {"model": "iPad Pro"}}'
+    ```
+    """
     service = KioskService(db)
     device = await service.register_device(store_id, data.device_code, data.device_name, data.device_info)
     result = await service.login_device(data.device_code)
@@ -38,7 +46,15 @@ async def login_device(
     data: DeviceLoginRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Autentica un dispositivo kiosko por su código."""
+    """Autentica un dispositivo kiosko por su código.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/kiosk/auth/login \\
+      -H "Content-Type: application/json" \\
+      -d '{"device_code": "KIOSK-001"}'
+    ```
+    """
     service = KioskService(db)
     result = await service.login_device(data.device_code)
     if not result:
@@ -53,7 +69,15 @@ async def create_kiosk_order(
     data: KioskOrderCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Crea un pedido desde el kiosko self-service."""
+    """Crea un pedido desde el kiosko self-service.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/kiosk/orders?device_id=uuid-device&store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Content-Type: application/json" \\
+      -d '{"customer_name": "Cliente 1", "items": [{"product_id": "uuid-producto", "quantity": 2, "price": 45.00}], "total": 90.00}'
+    ```
+    """
     service = KioskService(db)
     return await service.create_kiosk_order(device_id, store_id, data)
 
@@ -63,7 +87,13 @@ async def get_order_status(
     order_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Consulta el status actual de un pedido del kiosko."""
+    """Consulta el status actual de un pedido del kiosko.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/kiosk/orders/{order_id}/status
+    ```
+    """
     service = KioskService(db)
     order = await service.get_order_status(order_id)
     if not order:

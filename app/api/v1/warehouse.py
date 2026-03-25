@@ -49,7 +49,14 @@ async def activate_warehouse(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Activa el almacén central para la organización del usuario (requiere 2+ tiendas)."""
+    """Activa el almacén central para la organización del usuario (requiere 2+ tiendas).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/warehouse/activate \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(
         select(Organization).where(
             Organization.owner_id == current_user.id,
@@ -92,7 +99,14 @@ async def get_dashboard(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene el dashboard del almacén con resumen de stock, entradas y transferencias."""
+    """Obtiene el dashboard del almacén con resumen de stock, entradas y transferencias.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/warehouse/dashboard \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     return await service.get_dashboard(warehouse_store_id)
@@ -106,7 +120,16 @@ async def create_entry(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Registra una entrada de productos al almacén central."""
+    """Registra una entrada de productos al almacén central.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/warehouse/entries \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"supplier_name": "Proveedor ABC", "notes": "Pedido semanal", "items": [{"product_id": "uuid-producto", "quantity": 50, "unit_cost": 15.00}]}'
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     entry = await service.create_entry(
@@ -122,7 +145,14 @@ async def list_entries(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
-    """Lista las entradas de productos al almacén con paginación."""
+    """Lista las entradas de productos al almacén con paginación.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/warehouse/entries?page=1&per_page=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     result = await service.get_entries(warehouse_store_id, page, per_page)
@@ -136,7 +166,14 @@ async def get_entry(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene el detalle de una entrada específica del almacén."""
+    """Obtiene el detalle de una entrada específica del almacén.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/warehouse/entries/{entry_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     entry = await service.get_entry(entry_id)
@@ -153,7 +190,16 @@ async def create_transfer(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Crea una transferencia de productos del almacén a una tienda destino."""
+    """Crea una transferencia de productos del almacén a una tienda destino.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/warehouse/transfers \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"target_store_id": "uuid-tienda-destino", "notes": "Reposición semanal", "items": [{"product_id": "uuid-producto", "quantity": 20}]}'
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
 
     # Verificar que la tienda destino pertenece a la org
@@ -184,7 +230,14 @@ async def list_transfers(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
-    """Lista las transferencias realizadas desde el almacén con paginación."""
+    """Lista las transferencias realizadas desde el almacén con paginación.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/warehouse/transfers?page=1&per_page=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     result = await service.get_transfers(warehouse_store_id, page, per_page)
@@ -198,7 +251,14 @@ async def get_transfer(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene el detalle de una transferencia específica del almacén."""
+    """Obtiene el detalle de una transferencia específica del almacén.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/warehouse/transfers/{transfer_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     transfer = await service.get_transfer(transfer_id)
@@ -215,7 +275,16 @@ async def create_supply_entry(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Registra un movimiento de insumos en el almacén."""
+    """Registra un movimiento de insumos en el almacén.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/warehouse/supply-entries \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"entry_type": "ingreso", "items": [{"supply_id": "uuid-insumo", "quantity": 100, "unit_cost": 5.00}]}'
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     try:
@@ -237,7 +306,14 @@ async def get_log(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ):
-    """Obtiene la bitácora de movimientos del almacén (entradas, transferencias, insumos)."""
+    """Obtiene la bitácora de movimientos del almacén (entradas, transferencias, insumos).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/warehouse/log?log_type=entry&page=1&per_page=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     warehouse_store_id = await _get_warehouse_store_id(current_user, db)
     service = WarehouseService(db)
     return await service.get_log(warehouse_store_id, log_type=log_type, page=page, per_page=per_page)

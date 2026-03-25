@@ -23,7 +23,16 @@ async def create_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    """Crea un pedido de plataforma externa (Uber Eats, Rappi, etc.)."""
+    """Crea un pedido de plataforma externa (Uber Eats, Rappi, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/platform-orders/ \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"store_id": "d54c2c80-f76d-4717-be91-5cfbea4cbfff", "platform": "uber_eats", "external_id": "UE-12345", "customer_name": "Carlos", "total": 185.50, "items_json": []}'
+    ```
+    """
     service = PlatformOrderService(db)
     return await service.create_order(data, user_id=user.id)
 
@@ -40,7 +49,14 @@ async def list_orders(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ):
-    """Lista pedidos de plataformas con filtros por plataforma, status y fechas."""
+    """Lista pedidos de plataformas con filtros por plataforma, status y fechas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/platform-orders/?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff&platform=uber_eats&status=pending&limit=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = PlatformOrderService(db)
     return await service.get_orders(store_id, platform=platform, status=status, date_from=date_from, date_to=date_to, limit=limit, offset=offset)
 
@@ -51,7 +67,14 @@ async def get_stats(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Obtiene estadísticas agregadas de pedidos por plataforma."""
+    """Obtiene estadísticas agregadas de pedidos por plataforma.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/platform-orders/stats?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = PlatformOrderService(db)
     return await service.get_stats(store_id)
 
@@ -62,7 +85,14 @@ async def get_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Obtiene el detalle de un pedido de plataforma por su ID."""
+    """Obtiene el detalle de un pedido de plataforma por su ID.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/platform-orders/{order_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = PlatformOrderService(db)
     return await service.get_order(order_id)
 
@@ -74,6 +104,15 @@ async def update_order_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    """Actualiza el status de un pedido de plataforma."""
+    """Actualiza el status de un pedido de plataforma.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/platform-orders/{order_id}/status \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"status": "delivered"}'
+    ```
+    """
     service = PlatformOrderService(db)
     return await service.update_status(order_id, data, user_id=user.id)

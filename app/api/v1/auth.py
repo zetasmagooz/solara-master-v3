@@ -30,7 +30,19 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(data: RegisterRequest, db: Annotated[AsyncSession, Depends(get_db)]):
-    """Registra un nuevo usuario (owner) con su tienda. Retorna access_token y refresh_token."""
+    """Registra un nuevo usuario (owner) con su tienda. Retorna access_token y refresh_token.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/auth/register \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "person": {"first_name": "Juan", "last_name": "Pérez"},
+        "store": {"name": "Mi Tienda", "business_type_id": 1},
+        "password": "miPassword123"
+      }'
+    ```
+    """
     service = AuthService(db)
     try:
         user, store = await service.register(data)
@@ -47,7 +59,15 @@ async def register(data: RegisterRequest, db: Annotated[AsyncSession, Depends(ge
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]):
-    """Autentica un usuario con email/password. Retorna tokens, registra sesión y auto-asigna trial si aplica."""
+    """Autentica un usuario con email/password. Retorna tokens, registra sesión y auto-asigna trial si aplica.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/auth/login \\
+      -H "Content-Type: application/json" \\
+      -d '{"email": "user@example.com", "password": "secret"}'
+    ```
+    """
     service = AuthService(db)
     try:
         user, auto_detected_store = await service.authenticate(data)
@@ -104,7 +124,15 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(data: RefreshTokenRequest, db: Annotated[AsyncSession, Depends(get_db)]):
-    """Renueva los tokens de acceso usando un refresh_token válido. Retorna nuevos access_token y refresh_token."""
+    """Renueva los tokens de acceso usando un refresh_token válido. Retorna nuevos access_token y refresh_token.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/auth/refresh \\
+      -H "Content-Type: application/json" \\
+      -d '{"refresh_token": "eyJhbGciOiJIUzI1NiIs..."}'
+    ```
+    """
     try:
         payload = decode_token(data.refresh_token)
         if payload.get("type") != "refresh":
@@ -133,7 +161,16 @@ async def switch_store(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Cambiar tienda activa (solo owners). Emite nuevo JWT."""
+    """Cambiar tienda activa (solo owners). Emite nuevo JWT.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/auth/switch-store \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"store_id": "d54c2c80-f76d-4717-be91-5cfbea4cbfff"}'
+    ```
+    """
     if not current_user.is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo owners pueden cambiar de tienda")
 
@@ -163,7 +200,14 @@ async def switch_store(
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: Annotated[User, Depends(get_current_user)]):
-    """Retorna los datos del usuario autenticado a partir del token JWT."""
+    """Retorna los datos del usuario autenticado a partir del token JWT.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/auth/me \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     return current_user
 
 
@@ -173,7 +217,13 @@ async def logout(
     reason: Annotated[str | None, Query()] = None,
     user_id: Annotated[str | None, Query()] = None,
 ):
-    """Cierra las sesiones activas del usuario. Recibe user_id y motivo opcional por query params."""
+    """Cierra las sesiones activas del usuario. Recibe user_id y motivo opcional por query params.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE "http://66.179.92.115:8005/api/v1/auth/login?user_id=abc123&reason=logout"
+    ```
+    """
     # Cerrar sesiones activas del usuario
     if user_id:
         try:
@@ -198,6 +248,12 @@ async def logout(
 
 @router.get("/business-types", response_model=list[BusinessTypeResponse])
 async def list_business_types(db: Annotated[AsyncSession, Depends(get_db)]):
-    """Lista todos los tipos de negocio disponibles, ordenados por categoría y nombre."""
+    """Lista todos los tipos de negocio disponibles, ordenados por categoría y nombre.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/auth/business-types
+    ```
+    """
     result = await db.execute(select(BusinessType).order_by(BusinessType.category, BusinessType.name))
     return result.scalars().all()

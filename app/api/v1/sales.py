@@ -29,6 +29,25 @@ async def create_sale(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva venta con sus items y pagos asociados. Retorna la venta creada.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/sales/ \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "store_id": "{store_id}",
+        "subtotal": 100.00,
+        "tax": 16.00,
+        "total": 116.00,
+        "payment_type": 1,
+        "cash_received": 120.00,
+        "items": [{"product_id": "{product_id}", "quantity": 2, "unit_price": 50.00}],
+        "payments": [{"method": "cash", "amount": 116.00}]
+      }'
+    ```
+    """
     service = SaleService(db)
     sale = await service.create_sale(data, user_id=user.id)
     return sale
@@ -43,6 +62,14 @@ async def sales_summary(
     date_to: date | None = Query(default=None),
     filter_user_id: UUID | None = Query(default=None),
 ):
+    """Retorna resumen de ventas (total, cantidad, promedio) con filtros de fecha y usuario.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/summary?store_id={store_id}&date_from=2026-03-01&date_to=2026-03-25" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     return await service.get_sales_summary(
         store_id, date_from=date_from, date_to=date_to,
@@ -62,6 +89,14 @@ async def list_sales(
     date_to: date | None = Query(default=None),
     filter_user_id: UUID | None = Query(default=None),
 ):
+    """Lista ventas de una tienda con paginacion y filtros de fecha/usuario. Owners ven todas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/?store_id={store_id}&limit=50&offset=0" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     return await service.get_sales(
         store_id, limit=limit, offset=offset, date_from=date_from, date_to=date_to,
@@ -76,7 +111,14 @@ async def get_store_users_for_sales(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
-    """Lightweight list of store users (id + full name) for the user filter."""
+    """Lista ligera de usuarios de la tienda (id + nombre) para el filtro de ventas. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/users?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not user.is_owner:
         return []
     stmt = (
@@ -95,6 +137,14 @@ async def get_most_sold(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Retorna los productos mas vendidos de una tienda ordenados por cantidad.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/sales/most-sold/{store_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     return await service.get_most_sold(store_id)
 
@@ -107,6 +157,14 @@ async def get_customer_monthly(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Retorna el desglose mensual de ventas de un cliente para un anio especifico.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/customer-monthly/{store_id}?customer_id={customer_id}&year=2026" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     months = await service.get_customer_monthly(store_id, customer_id, year)
     return {"months": months}
@@ -120,6 +178,14 @@ async def get_product_monthly(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Retorna el desglose mensual de ventas de un producto para un anio especifico.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/product-monthly/{store_id}?product_id={product_id}&year=2026" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     months = await service.get_product_monthly(store_id, product_id, year)
     return {"months": months}
@@ -148,7 +214,14 @@ async def sales_by_day(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Daily sales for a given month + previous month for comparison."""
+    """Retorna ventas diarias de un mes con el mes anterior para comparacion (graficas).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/by-day?store_id={store_id}&year=2026&month=3" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
 
     async def _fetch_days(y: int, m: int) -> list[dict]:
         days_in = monthrange(y, m)[1]
@@ -196,7 +269,14 @@ async def sales_by_month(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
-    """Monthly sales for a given year + previous year for comparison."""
+    """Retorna ventas mensuales de un anio con el anio anterior para comparacion (graficas).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/by-month?store_id={store_id}&year=2026" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
 
     async def _fetch_months(y: int) -> list[dict]:
         local_month = func.extract("month", Sale.created_at.op("AT TIME ZONE")("America/Mexico_City"))
@@ -237,6 +317,14 @@ async def get_sale(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de una venta por su ID con items y pagos. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/sales/{sale_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SaleService(db)
     sale = await service.get_sale(sale_id)
     if not sale:
@@ -251,6 +339,14 @@ async def update_sale_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza el status de una venta (order, paid, cancelled, completed).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH "http://66.179.92.115:8005/api/v1/sales/{sale_id}/status?status=completed" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     valid = {"order", "paid", "cancelled", "completed"}
     if status not in valid:
         raise HTTPException(status_code=400, detail=f"Status inválido. Válidos: {valid}")

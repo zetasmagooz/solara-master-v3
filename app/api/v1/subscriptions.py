@@ -15,7 +15,13 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 async def list_plans(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Lista todos los planes disponibles."""
+    """Lista todos los planes disponibles.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/subscriptions/plans
+    ```
+    """
     service = SubscriptionService(db)
     return await service.get_all_plans()
 
@@ -25,7 +31,14 @@ async def get_current_subscription(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene la suscripción actual de la organización. Auto-expira trials vencidos."""
+    """Obtiene la suscripción actual de la organización. Auto-expira trials vencidos.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/subscriptions/current \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No tienes una organización")
 
@@ -42,7 +55,16 @@ async def activate_plan(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Cambia el plan de la organización. Solo owners."""
+    """Cambia el plan de la organización. Solo owners.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/subscriptions/activate \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"plan_slug": "pro"}'
+    ```
+    """
     if not current_user.organization_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No tienes una organización")
 

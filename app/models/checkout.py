@@ -9,6 +9,7 @@ from app.database import Base
 
 
 class CheckoutDeposit(Base):
+    """Depósito de efectivo en caja. Monto y descripción registrados por un usuario."""
     __tablename__ = "checkout_deposits"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -20,6 +21,7 @@ class CheckoutDeposit(Base):
 
 
 class CheckoutExpense(Base):
+    """Gasto registrado en caja. Descripción, monto y categoría del gasto."""
     __tablename__ = "checkout_expenses"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -32,6 +34,7 @@ class CheckoutExpense(Base):
 
 
 class CheckoutWithdrawal(Base):
+    """Retiro de efectivo de caja. Monto y motivo del retiro."""
     __tablename__ = "checkout_withdrawals"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -43,6 +46,7 @@ class CheckoutWithdrawal(Base):
 
 
 class CheckoutCut(Base):
+    """Corte de caja (parcial o total). Totales de ventas, gastos, retiros, efectivo esperado vs real y diferencia."""
     __tablename__ = "checkout_cuts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -60,6 +64,7 @@ class CheckoutCut(Base):
 
 
 class CheckoutPayment(Base):
+    """Pago registrado en caja. Método de pago, monto y referencia vinculada a una venta."""
     __tablename__ = "checkout_payments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))

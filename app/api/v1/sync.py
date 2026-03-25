@@ -17,7 +17,13 @@ async def get_full_catalog(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene el catálogo completo de una tienda para sincronización del kiosko."""
+    """Obtiene el catálogo completo de una tienda para sincronización del kiosko.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/kiosk/sync/catalog?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff"
+    ```
+    """
     service = SyncService(db)
     return await service.get_full_catalog(store_id)
 
@@ -28,6 +34,12 @@ async def get_changes(
     since: Annotated[datetime, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtiene los cambios del catálogo desde una fecha dada (sync incremental)."""
+    """Obtiene los cambios del catálogo desde una fecha dada (sync incremental).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/kiosk/sync/changes?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff&since=2026-03-24T00:00:00"
+    ```
+    """
     service = SyncService(db)
     return await service.get_changes_since(store_id, since)

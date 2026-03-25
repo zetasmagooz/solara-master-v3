@@ -23,6 +23,14 @@ async def list_suppliers(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Lista proveedores de la tienda con paginación y filtros opcionales.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/suppliers?page=1&per_page=20&search=coca" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -43,6 +51,16 @@ async def create_supplier(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Crea un nuevo proveedor en la tienda del usuario.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/suppliers \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Distribuidora ABC", "contact_name": "Juan", "phone": "5551234567", "email": "proveedor@abc.com"}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -56,6 +74,16 @@ async def create_supplier_with_propagation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Crea un proveedor en el almacén y lo propaga a las tiendas destino.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/suppliers/propagate \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Distribuidora ABC", "phone": "5551234567", "propagate_to_stores": ["uuid-tienda-1", "uuid-tienda-2"]}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -85,6 +113,14 @@ async def get_suppliers_by_brand(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Obtiene los proveedores asociados a una marca específica.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/suppliers/by-brand/{brand_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -98,6 +134,14 @@ async def get_supplier(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Obtiene el detalle de un proveedor por su ID.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/suppliers/{supplier_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = SupplierService(db)
     try:
         return await service.get_by_id(supplier_id)
@@ -112,6 +156,16 @@ async def update_supplier(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Actualiza parcialmente los datos de un proveedor.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/suppliers/{supplier_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Distribuidora XYZ", "phone": "5559876543"}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -132,6 +186,14 @@ async def delete_supplier(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """Elimina un proveedor de la tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/suppliers/{supplier_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 

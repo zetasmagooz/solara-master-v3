@@ -27,7 +27,14 @@ async def get_my_organization(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtener la organización del owner autenticado."""
+    """Obtener la organización del owner autenticado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/organizations/mine \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = OrganizationService(db)
     org = await service.get_by_owner(current_user.id)
     if not org:
@@ -42,7 +49,16 @@ async def update_organization(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Actualizar datos de la organización."""
+    """Actualizar datos de la organización.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/organizations/{org_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Mi Empresa S.A.", "logo_url": "https://ejemplo.com/logo.png"}'
+    ```
+    """
     # Verificar que la org pertenece al owner
     result = await db.execute(
         select(Organization).where(Organization.id == org_id, Organization.owner_id == current_user.id)
@@ -61,7 +77,14 @@ async def get_org_defaults(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Obtener defaults de la organización para nuevas tiendas."""
+    """Obtener defaults de la organización para nuevas tiendas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/organizations/{org_id}/defaults \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     result = await db.execute(
         select(Organization).where(Organization.id == org_id, Organization.owner_id == current_user.id)
     )
@@ -78,7 +101,16 @@ async def update_org_defaults(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Actualizar defaults de la organización (owner only)."""
+    """Actualizar defaults de la organización (owner only).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/organizations/{org_id}/defaults \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"default_currency": "MXN", "default_tax_rate": 16.0}'
+    ```
+    """
     result = await db.execute(
         select(Organization).where(Organization.id == org_id, Organization.owner_id == current_user.id)
     )
@@ -99,7 +131,14 @@ async def list_organization_stores(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Listar tiendas de la organización."""
+    """Listar tiendas de la organización.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/organizations/{org_id}/stores \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     # Verificar acceso
     result = await db.execute(
         select(Organization).where(Organization.id == org_id, Organization.owner_id == current_user.id)
@@ -118,7 +157,16 @@ async def copy_catalog(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Copiar catálogo de una tienda a otra dentro de la misma organización."""
+    """Copiar catálogo de una tienda a otra dentro de la misma organización.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/organizations/stores/{target_store_id}/copy-catalog \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"source_store_id": "uuid-tienda-origen"}'
+    ```
+    """
     # Verificar que ambas tiendas pertenecen al owner
     source = await db.execute(
         select(Store).where(Store.id == data.source_store_id, Store.owner_id == current_user.id)
@@ -143,7 +191,14 @@ async def activate_module(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Activa un módulo premium para la organización."""
+    """Activa un módulo premium para la organización.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/organizations/modules/restaurant/activate \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     allowed = {"restaurant"}
     if module_name not in allowed:
         raise HTTPException(status_code=400, detail=f"Módulo '{module_name}' no válido")

@@ -36,6 +36,7 @@ class Supply(Base):
 
 
 class ProductSupply(Base):
+    """Relación producto-insumo. Cantidad requerida, unidad, costo calculado y si es opcional."""
     __tablename__ = "product_supplies"
     __table_args__ = (UniqueConstraint("product_id", "supply_id"),)
 

@@ -31,6 +31,14 @@ async def get_cash_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Retorna el estado actual de caja (saldo, ventas, depositos, retiros, gastos del turno).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/checkout/status?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CheckoutService(db)
     return await service.get_cash_status(store_id, user_id=user.id, is_owner=user.is_owner)
 
@@ -42,6 +50,16 @@ async def create_deposit(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Registra un deposito/fondo de caja. Retorna el movimiento creado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/checkout/deposits?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"amount": 500.00, "description": "Fondo inicial"}'
+    ```
+    """
     service = CheckoutService(db)
     dep = await service.create_deposit(data, store_id, user.id)
     return MovementResponse(
@@ -64,6 +82,14 @@ async def list_expenses(
     limit: int = Query(default=10, le=200),
     offset: int = Query(default=0, ge=0),
 ):
+    """Lista gastos de una tienda con paginacion y filtros de fecha/categoria.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/checkout/expenses?store_id={store_id}&date_from=2026-03-01&date_to=2026-03-25&limit=10" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     tz_mx = ZoneInfo("America/Mexico_City")
     dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min, tzinfo=tz_mx) if date_from else None
     dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59), tzinfo=tz_mx) if date_to else None
@@ -85,6 +111,14 @@ async def get_expenses_summary(
     date_to: str | None = Query(default=None, description="YYYY-MM-DD"),
     category: str | None = Query(default=None),
 ):
+    """Retorna resumen completo de gastos con total y listado, filtrable por fecha/categoria.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/checkout/expenses/summary?store_id={store_id}&date_from=2026-03-01&date_to=2026-03-25" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     tz_mx = ZoneInfo("America/Mexico_City")
     dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min, tzinfo=tz_mx) if date_from else None
     dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59), tzinfo=tz_mx) if date_to else None
@@ -103,6 +137,16 @@ async def create_expense(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Registra un gasto de caja con monto, descripcion y categoria. Retorna el movimiento creado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/checkout/expenses?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"amount": 150.00, "description": "Compra de insumos", "category": "insumos"}'
+    ```
+    """
     service = CheckoutService(db)
     exp = await service.create_expense(data, store_id, user.id, is_owner=user.is_owner)
     return MovementResponse(
@@ -121,6 +165,16 @@ async def create_withdrawal(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Registra un retiro de efectivo de caja. Retorna el movimiento creado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/checkout/withdrawals?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"amount": 200.00, "reason": "Retiro parcial"}'
+    ```
+    """
     service = CheckoutService(db)
     wit = await service.create_withdrawal(data, store_id, user.id, is_owner=user.is_owner)
     return MovementResponse(
@@ -139,6 +193,16 @@ async def create_cut(
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
 ):
+    """Realiza un corte de caja. Calcula diferencia entre efectivo esperado y contado.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/checkout/cuts?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"cash_actual": 1500.00}'
+    ```
+    """
     service = CheckoutService(db)
     return await service.create_cut(data, store_id, user.id, is_owner=user.is_owner)
 
@@ -149,6 +213,14 @@ async def get_cut_movements(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todos los movimientos (ventas, depositos, retiros, gastos) asociados a un corte de caja.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/checkout/cuts/{cut_id}/movements \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CheckoutService(db)
     return await service.get_cut_movements(cut_id)
 
@@ -160,5 +232,13 @@ async def list_cuts(
     user: Annotated[User, Depends(get_current_user)],
     limit: int = Query(default=20, le=100),
 ):
+    """Lista los cortes de caja de una tienda. Owners ven todos; empleados solo los propios.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/checkout/cuts?store_id={store_id}&limit=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CheckoutService(db)
     return await service.get_cuts(store_id, user_id=user.id, is_owner=user.is_owner, limit=limit)

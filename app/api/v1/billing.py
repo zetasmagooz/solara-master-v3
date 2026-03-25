@@ -32,7 +32,14 @@ async def billing_overview(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Resumen completo de billing: suscripción, métodos de pago, facturas."""
+    """Resumen completo de billing: suscripción, métodos de pago, facturas.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/billing/overview \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     return await service.get_billing_overview(current_user.organization_id)
@@ -45,7 +52,14 @@ async def create_setup_intent(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Crea un SetupIntent para tokenizar una nueva tarjeta."""
+    """Crea un SetupIntent para tokenizar una nueva tarjeta.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/billing/setup-intent \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     return await service.create_setup_intent(current_user.organization_id)
@@ -56,7 +70,14 @@ async def list_payment_methods(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Lista los métodos de pago guardados."""
+    """Lista los métodos de pago guardados.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/billing/payment-methods \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     return await service.list_payment_methods(current_user.organization_id)
@@ -67,7 +88,14 @@ async def sync_payment_methods(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Sincroniza payment methods desde Stripe tras agregar tarjeta."""
+    """Sincroniza payment methods desde Stripe tras agregar tarjeta.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/billing/sync-payment-methods \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     return await service.sync_payment_methods(current_user.organization_id)
@@ -79,7 +107,16 @@ async def set_default_payment_method(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Establece un método de pago como default."""
+    """Establece un método de pago como default.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/billing/payment-methods/default \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"payment_method_id": "uuid-metodo-pago"}'
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     try:
@@ -95,7 +132,14 @@ async def delete_payment_method(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Elimina un método de pago."""
+    """Elimina un método de pago.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/billing/payment-methods/{pm_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     try:
@@ -114,7 +158,16 @@ async def create_subscription(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Crea o cambia la suscripción de Stripe."""
+    """Crea o cambia la suscripción de Stripe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/billing/subscribe \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"plan_slug": "pro"}'
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     try:
@@ -128,7 +181,14 @@ async def cancel_subscription(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Cancela la suscripción al final del periodo."""
+    """Cancela la suscripción al final del periodo.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/billing/cancel \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     _require_org(current_user)
     service = StripeBillingService(db)
     try:

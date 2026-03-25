@@ -20,7 +20,16 @@ async def create_adjustment(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Crea un ajuste de inventario (merma, corrección, etc.) para productos."""
+    """Crea un ajuste de inventario (merma, corrección, etc.) para productos.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/inventory/adjustments \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"reason": "merma", "notes": "Producto dañado", "items": [{"product_id": "uuid-producto", "quantity": -2}]}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -43,7 +52,16 @@ async def create_inventory_entry(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Registra un movimiento de inventario (ingreso/egreso/reemplazo)."""
+    """Registra un movimiento de inventario (ingreso/egreso/reemplazo).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/inventory/entries \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"entry_type": "ingreso", "items": [{"product_id": "uuid-producto", "quantity": 10, "unit_cost": 25.50}]}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -68,7 +86,14 @@ async def get_inventory_log(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Bitácora unificada de movimientos de productos e insumos."""
+    """Bitácora unificada de movimientos de productos e insumos.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/inventory/log?log_type=product&page=1&per_page=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -88,7 +113,14 @@ async def list_adjustments(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Lista los ajustes de inventario de la tienda con paginación."""
+    """Lista los ajustes de inventario de la tienda con paginación.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/inventory/adjustments?page=1&per_page=20" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 

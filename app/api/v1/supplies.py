@@ -26,7 +26,13 @@ router = APIRouter(prefix="/supplies", tags=["supplies"])
 
 @router.get("/unit-types", response_model=list[UnitTypeResponse])
 async def list_unit_types():
-    """Retorna catálogo de tipos de unidad con sus unidades."""
+    """Retorna catálogo de tipos de unidad con sus unidades.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/supplies/unit-types
+    ```
+    """
     result = []
     for key, type_def in UNIT_TYPES.items():
         units = [
@@ -48,6 +54,14 @@ async def list_supplies(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista todos los insumos de una tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/supplies/?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_supplies(store_id)
 
@@ -59,6 +73,16 @@ async def create_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea un nuevo insumo en la tienda.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/supplies/?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Harina", "unit_type": "weight", "unit": "kg", "stock": 50, "min_stock": 10}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_supply(store_id, **data.model_dump())
 
@@ -69,7 +93,16 @@ async def create_supply_entry(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Registra un movimiento de insumos (ingreso/egreso/reemplazo)."""
+    """Registra un movimiento de insumos (ingreso/egreso/reemplazo).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/supplies/entries \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"entry_type": "ingreso", "items": [{"supply_id": "uuid-insumo", "quantity": 25, "unit_cost": 12.50}]}'
+    ```
+    """
     if not current_user.default_store_id:
         raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
 
@@ -92,6 +125,14 @@ async def get_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de un insumo por su ID.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/supplies/{supply_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     supply = await service.get_supply(supply_id)
     if not supply:
@@ -106,6 +147,16 @@ async def update_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza parcialmente un insumo (nombre, unidad, stock mínimo, etc.).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/supplies/{supply_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Harina integral", "min_stock": 15}'
+    ```
+    """
     service = CatalogService(db)
     result = await service.update_supply(supply_id, **data.model_dump(exclude_unset=True))
     if not result:
@@ -119,6 +170,14 @@ async def delete_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina un insumo por su ID.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/supplies/{supply_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_supply(supply_id):
         raise HTTPException(status_code=404, detail="Supply not found")
@@ -130,6 +189,14 @@ async def list_product_supplies(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Lista los insumos asociados a un producto (receta/composición).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/supplies/products/{product_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     return await service.get_product_supplies(product_id)
 
@@ -141,6 +208,16 @@ async def add_supply_to_product(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Asocia un insumo a un producto con la cantidad requerida.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/supplies/products/{product_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"supply_id": "uuid-insumo", "quantity_per_unit": 0.5}'
+    ```
+    """
     service = CatalogService(db)
     return await service.create_product_supply(product_id, **data.model_dump())
 
@@ -152,6 +229,16 @@ async def update_product_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza la relación insumo-producto (cantidad, unidad).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH http://66.179.92.115:8005/api/v1/supplies/product-supplies/{ps_id} \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"quantity_per_unit": 0.75}'
+    ```
+    """
     service = CatalogService(db)
     result = await service.update_product_supply(ps_id, **data.model_dump(exclude_unset=True))
     if not result:
@@ -165,6 +252,14 @@ async def delete_product_supply(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Elimina la asociación de un insumo con un producto.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X DELETE http://66.179.92.115:8005/api/v1/supplies/product-supplies/{ps_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = CatalogService(db)
     if not await service.delete_product_supply(ps_id):
         raise HTTPException(status_code=404, detail="Product supply not found")

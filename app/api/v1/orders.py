@@ -41,6 +41,20 @@ async def create_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
+    """Crea una nueva orden (comanda) para una tienda con sus items.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/orders/?store_id={store_id}" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "source": "pos",
+        "notes": "Mesa 5",
+        "items": [{"product_id": "{product_id}", "quantity": 2, "unit_price": 50.00}]
+      }'
+    ```
+    """
     service = OrderService(db)
     return await service.create_order(store_id, data, user_id=current_user.id)
 
@@ -52,6 +66,14 @@ async def list_orders(
     current_user: Annotated[User, Depends(get_current_user)],
     order_status: str | None = None,
 ):
+    """Lista ordenes de una tienda con filtro opcional de status. Usuarios con permiso ven todas, otros solo las propias.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/orders/?store_id={store_id}&order_status=pending" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = OrderService(db)
     see_all = await _can_see_all_orders(current_user, db)
     user_id = None if see_all else current_user.id
@@ -64,6 +86,14 @@ async def get_order(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Obtiene el detalle de una orden por su ID con items. Retorna 404 si no existe.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET http://66.179.92.115:8005/api/v1/orders/{order_id} \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = OrderService(db)
     order = await service.get_order(order_id)
     if not order:
@@ -78,6 +108,14 @@ async def update_order_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
 ):
+    """Actualiza el status de una orden (pending, preparing, ready, delivered, cancelled).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X PATCH "http://66.179.92.115:8005/api/v1/orders/{order_id}/status?new_status=ready" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
     service = OrderService(db)
     order = await service.update_order_status(order_id, new_status)
     if not order:
