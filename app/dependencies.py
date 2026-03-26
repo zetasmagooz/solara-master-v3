@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal
+from app.models.auth import Session as SessionModel
 from app.models.user import User, UserRolePermission
 from app.utils.security import decode_token
 
@@ -51,6 +52,21 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+
+    # Validar sesión activa para no-owners (single-session enforcement)
+    session_id = payload.get("session_id")
+    if session_id and not user.is_owner:
+        session_result = await db.execute(
+            select(SessionModel.is_active).where(SessionModel.id == session_id)
+        )
+        session_active = session_result.scalar_one_or_none()
+        if session_active is False:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="session_replaced",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
     return user
 
 

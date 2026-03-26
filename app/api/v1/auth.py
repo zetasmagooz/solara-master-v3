@@ -94,11 +94,15 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
     store = store_result.scalar_one_or_none()
     trial_ends_at = store.trial_ends_at if store else None
 
-    tokens = await service.create_tokens(user, trial_ends_at=trial_ends_at)
-    if auto_detected_store:
-        tokens["auto_detected_store"] = auto_detected_store
+    # Si NO es owner, cerrar todas las sesiones anteriores (single-session enforcement)
+    if not user.is_owner:
+        await db.execute(
+            update(SessionModel)
+            .where(SessionModel.user_id == user.id, SessionModel.is_active.is_(True))
+            .values(is_active=False, ended_at=datetime.now(), close_reason="new_login_other_device")
+        )
 
-    # Registrar sesión
+    # Registrar sesión nueva
     geo = None
     if data.latitude is not None and data.longitude is not None:
         geo = f"{data.latitude},{data.longitude}"
@@ -109,6 +113,16 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
         geolocation=geo,
     )
     db.add(session)
+    await db.flush()
+
+    # Crear tokens con session_id embebido (para validación de sesión única)
+    tokens = await service.create_tokens(
+        user,
+        trial_ends_at=trial_ends_at,
+        session_id=session.id if not user.is_owner else None,
+    )
+    if auto_detected_store:
+        tokens["auto_detected_store"] = auto_detected_store
 
     # Auto-asignar trial Ultimate si el owner no tiene suscripción
     if user.is_owner and user.organization_id:
@@ -142,6 +156,16 @@ async def refresh_token(data: RefreshTokenRequest, db: Annotated[AsyncSession, D
         if not user_id:
             raise HTTPException(status_code=401, detail="Token inválido")
 
+        # Validar sesión activa para no-owners
+        session_id = payload.get("session_id")
+        if session_id:
+            session_result = await db.execute(
+                select(SessionModel.is_active).where(SessionModel.id == session_id)
+            )
+            session_active = session_result.scalar_one_or_none()
+            if session_active is False:
+                raise HTTPException(status_code=401, detail="session_replaced")
+
         result = await db.execute(
             select(User).where(User.id == user_id, User.is_active.is_(True)).options(selectinload(User.person))
         )
@@ -150,7 +174,7 @@ async def refresh_token(data: RefreshTokenRequest, db: Annotated[AsyncSession, D
             raise HTTPException(status_code=401, detail="Usuario no encontrado")
 
         service = AuthService(db)
-        return await service.create_tokens(user)
+        return await service.create_tokens(user, session_id=session_id)
     except JWTError:
         raise HTTPException(status_code=401, detail="Token expirado o inválido")
 

@@ -181,7 +181,7 @@ class AuthService:
         # La tienda decidirá si requiere geo en su configuración
         return user, auto_detected_store
 
-    async def create_tokens(self, user: User, trial_ends_at: datetime | None = None) -> dict:
+    async def create_tokens(self, user: User, trial_ends_at: datetime | None = None, session_id: int | None = None) -> dict:
         token_data = {
             "sub": str(user.id),
             "name": "",
@@ -193,6 +193,9 @@ class AuthService:
             "permissions": [],
             "require_password_change": False,
         }
+        # Incluir session_id para validación de sesión única (no-owners)
+        if session_id:
+            token_data["session_id"] = session_id
         if user.person:
             token_data["name"] = f"{user.person.first_name} {user.person.last_name}".strip()
 
