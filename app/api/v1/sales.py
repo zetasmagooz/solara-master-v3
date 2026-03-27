@@ -138,17 +138,20 @@ async def get_most_sold(
     store_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     _: Annotated[User, Depends(get_current_user)],
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    brand_id: UUID | None = Query(default=None),
 ):
     """Retorna los productos mas vendidos de una tienda ordenados por cantidad.
 
     **Ejemplo curl:**
     ```bash
-    curl -X GET http://66.179.92.115:8005/api/v1/sales/most-sold/{store_id} \\
+    curl -X GET "http://66.179.92.115:8005/api/v1/sales/most-sold/{store_id}?date_from=2026-03-01&date_to=2026-03-27" \\
       -H "Authorization: Bearer {token}"
     ```
     """
     service = SaleService(db)
-    return await service.get_most_sold(store_id)
+    return await service.get_most_sold(store_id, date_from=date_from, date_to=date_to, brand_id=brand_id)
 
 
 @router.get("/customer-monthly/{store_id}")

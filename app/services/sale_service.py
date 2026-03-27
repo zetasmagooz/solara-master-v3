@@ -410,8 +410,25 @@ class SaleService:
             for m in range(1, 13)
         ]
 
-    async def get_most_sold(self, store_id: UUID) -> list[dict]:
+    async def get_most_sold(
+        self, store_id: UUID,
+        date_from: date | None = None, date_to: date | None = None,
+        brand_id: UUID | None = None,
+    ) -> list[dict]:
         from sqlalchemy import or_, literal, case as sa_case
+
+        date_filters = []
+        if date_from:
+            date_filters.append(func.date(func.timezone('America/Mexico_City', Sale.created_at)) >= date_from)
+        if date_to:
+            date_filters.append(func.date(func.timezone('America/Mexico_City', Sale.created_at)) <= date_to)
+
+        brand_filter = []
+        if brand_id:
+            from app.models.catalog import Product
+            brand_filter.append(SaleItem.product_id.in_(
+                select(Product.id).where(Product.brand_id == brand_id)
+            ))
 
         # Products: group by product_id
         product_stmt = (
@@ -428,6 +445,8 @@ class SaleService:
                 Sale.status != 'cancelled',
                 SaleItem.product_id.isnot(None),
                 SaleItem.combo_id.is_(None),
+                *date_filters,
+                *brand_filter,
             )
             .group_by(SaleItem.product_id, SaleItem.name)
         )
@@ -446,6 +465,7 @@ class SaleService:
                 Sale.store_id == store_id,
                 Sale.status != 'cancelled',
                 SaleItem.combo_id.isnot(None),
+                *date_filters,
             )
             .group_by(SaleItem.combo_id, SaleItem.name)
         )
