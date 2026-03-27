@@ -225,6 +225,7 @@ class SaleService:
         user_id: UUID | None = None,
         is_owner: bool = True,
         filter_user_id: UUID | None = None,
+        customer_id: UUID | None = None,
     ):
         stmt = (
             select(Sale)
@@ -243,6 +244,8 @@ class SaleService:
             stmt = stmt.where(Sale.user_id == user_id)
         if filter_user_id:
             stmt = stmt.where(Sale.user_id == filter_user_id)
+        if customer_id:
+            stmt = stmt.where(Sale.customer_id == customer_id)
         if date_from:
             stmt = stmt.where(func.date(func.timezone('America/Mexico_City', Sale.created_at)) >= date_from)
         if date_to:
@@ -334,8 +337,9 @@ class SaleService:
         stmt = (
             select(
                 func.extract('month', Sale.created_at).label('month_num'),
-                func.coalesce(func.sum(Sale.total), 0).label('total'),
+                func.coalesce(func.sum(Payment.amount), 0).label('total'),
             )
+            .join(Payment, Payment.sale_id == Sale.id)
             .where(
                 Sale.store_id == store_id,
                 Sale.customer_id == customer_id,
@@ -349,6 +353,33 @@ class SaleService:
         return [
             {'month': m, 'label': self.MONTH_LABELS[m - 1], 'total': round(rows.get(m, 0), 2)}
             for m in range(1, 13)
+        ]
+
+    async def get_customer_daily(self, store_id: UUID, customer_id: UUID, year: int, month: int) -> list[dict]:
+        """Consumo diario de un cliente en un mes específico."""
+        import calendar
+        days_in_month = calendar.monthrange(year, month)[1]
+        stmt = (
+            select(
+                func.extract('day', Sale.created_at.op('AT TIME ZONE')('America/Mexico_City')).label('day_num'),
+                func.coalesce(func.sum(Payment.amount), 0).label('total'),
+                func.count(func.distinct(Sale.id)).label('count'),
+            )
+            .join(Payment, Payment.sale_id == Sale.id)
+            .where(
+                Sale.store_id == store_id,
+                Sale.customer_id == customer_id,
+                Sale.status != 'cancelled',
+                func.extract('year', Sale.created_at.op('AT TIME ZONE')('America/Mexico_City')) == year,
+                func.extract('month', Sale.created_at.op('AT TIME ZONE')('America/Mexico_City')) == month,
+            )
+            .group_by('day_num')
+        )
+        result = await self.db.execute(stmt)
+        rows = {int(r.day_num): {'total': float(r.total), 'count': int(r.count)} for r in result.all()}
+        return [
+            {'day': d, 'label': str(d), 'total': round(rows.get(d, {}).get('total', 0), 2), 'count': rows.get(d, {}).get('count', 0)}
+            for d in range(1, days_in_month + 1)
         ]
 
     async def get_product_monthly(self, store_id: UUID, product_id: UUID, year: int) -> list[dict]:

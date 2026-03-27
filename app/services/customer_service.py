@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.customer import Customer
-from app.models.sale import Sale, SaleItem
+from app.models.sale import Sale, SaleItem, Payment
 from app.schemas.customer import CustomerCreate, CustomerQuickCreate, CustomerUpdate
 
 
@@ -54,13 +54,14 @@ class CustomerService:
         return result.scalar_one_or_none()
 
     async def get_customer_stats(self, customer_id: UUID) -> dict:
-        """Obtiene estadísticas del cliente: total gastado, última compra, último producto."""
-        # Total gastado y número de compras
+        """Obtiene estadísticas del cliente: total gastado (payments.amount), visitas, última compra."""
+        # Total gastado vía payments y número de compras (visitas)
         totals_stmt = (
             select(
-                func.count(Sale.id).label("total_purchases"),
-                func.coalesce(func.sum(Sale.total), 0).label("total_spent"),
+                func.count(func.distinct(Sale.id)).label("total_purchases"),
+                func.coalesce(func.sum(Payment.amount), 0).label("total_spent"),
             )
+            .join(Payment, Payment.sale_id == Sale.id)
             .where(Sale.customer_id == customer_id, Sale.status != "cancelled")
         )
         totals = (await self.db.execute(totals_stmt)).one()
@@ -133,13 +134,21 @@ class CustomerService:
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict]:
-        # Subqueries for last_purchase_date and total_spent
+        # Subqueries: total_spent (via payments), visit_count real, last_purchase_date
         total_spent_sq = (
-            select(func.coalesce(func.sum(Sale.total), 0))
+            select(func.coalesce(func.sum(Payment.amount), 0))
+            .join(Sale, Sale.id == Payment.sale_id)
             .where(Sale.customer_id == Customer.id, Sale.status != "cancelled")
             .correlate(Customer)
             .scalar_subquery()
             .label("total_spent")
+        )
+        visit_count_sq = (
+            select(func.count(Sale.id))
+            .where(Sale.customer_id == Customer.id, Sale.status != "cancelled")
+            .correlate(Customer)
+            .scalar_subquery()
+            .label("real_visit_count")
         )
         last_purchase_sq = (
             select(func.max(Sale.created_at))
@@ -149,7 +158,7 @@ class CustomerService:
             .label("last_purchase_date")
         )
 
-        stmt = select(Customer, total_spent_sq, last_purchase_sq).where(Customer.store_id == store_id)
+        stmt = select(Customer, total_spent_sq, last_purchase_sq, visit_count_sq).where(Customer.store_id == store_id)
 
         if is_active is not None:
             stmt = stmt.where(Customer.is_active == is_active)
@@ -175,6 +184,7 @@ class CustomerService:
             c = row[0]
             c.total_spent = float(row[1]) if row[1] else 0
             c.last_purchase_date = row[2].isoformat() if row[2] else None
+            c.visit_count = int(row[3]) if row[3] else 0
             customers.append(c)
         return customers
 

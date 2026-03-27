@@ -88,8 +88,9 @@ async def list_sales(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     filter_user_id: UUID | None = Query(default=None),
+    customer_id: UUID | None = Query(default=None),
 ):
-    """Lista ventas de una tienda con paginacion y filtros de fecha/usuario. Owners ven todas.
+    """Lista ventas de una tienda con paginacion y filtros de fecha/usuario/cliente. Owners ven todas.
 
     **Ejemplo curl:**
     ```bash
@@ -102,6 +103,7 @@ async def list_sales(
         store_id, limit=limit, offset=offset, date_from=date_from, date_to=date_to,
         user_id=user.id, is_owner=user.is_owner,
         filter_user_id=filter_user_id if user.is_owner else None,
+        customer_id=customer_id,
     )
 
 
@@ -168,6 +170,23 @@ async def get_customer_monthly(
     service = SaleService(db)
     months = await service.get_customer_monthly(store_id, customer_id, year)
     return {"months": months}
+
+
+@router.get("/customer-daily/{store_id}")
+async def get_customer_daily(
+    store_id: UUID,
+    customer_id: Annotated[UUID, Query()],
+    year: Annotated[int, Query()],
+    month: Annotated[int, Query()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Consumo diario de un cliente en un mes específico."""
+    service = SaleService(db)
+    days = await service.get_customer_daily(store_id, customer_id, year, month)
+    total_spent = sum(d['total'] for d in days)
+    total_visits = sum(d['count'] for d in days)
+    return {"days": days, "total_spent": total_spent, "total_visits": total_visits}
 
 
 @router.get("/product-monthly/{store_id}")

@@ -87,7 +87,8 @@ class ExpensePage(BaseModel):
 
 class ExpenseSummary(BaseModel):
     records: list[ExpenseRecord]
-    total: int
+    total: float
+    count: int = 0
 
 
 class CutResponse(BaseModel):

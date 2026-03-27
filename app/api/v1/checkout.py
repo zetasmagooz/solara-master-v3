@@ -123,10 +123,13 @@ async def get_expenses_summary(
     dt_from = datetime.combine(datetime.strptime(date_from, "%Y-%m-%d").date(), time.min, tzinfo=tz_mx) if date_from else None
     dt_to = datetime.combine(datetime.strptime(date_to, "%Y-%m-%d").date(), time(23, 59, 59), tzinfo=tz_mx) if date_to else None
     service = CheckoutService(db)
-    records, total = await service.list_expenses(store_id, dt_from, dt_to, category, limit=9999, offset=0)
+    records, count = await service.list_expenses(store_id, dt_from, dt_to, category, limit=9999, offset=0)
+    expense_records = [ExpenseRecord(**r) for r in records]
+    total_amount = sum(r.amount for r in expense_records)
     return ExpenseSummary(
-        records=[ExpenseRecord(**r) for r in records],
-        total=total,
+        records=expense_records,
+        total=total_amount,
+        count=count,
     )
 
 

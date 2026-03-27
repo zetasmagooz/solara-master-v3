@@ -1220,6 +1220,21 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 for r in rows
             ]
 
+    @staticmethod
+    def _parse_numeric_value(raw: Any) -> tuple[float, bool]:
+        """Extrae número y detecta si es porcentaje de strings como '5 pesos', '10%', '10 por ciento'."""
+        import re
+        s = str(raw).strip().lower()
+        is_pct = False
+        if "%" in s or "por ciento" in s or "porciento" in s:
+            is_pct = True
+        # Quitar todo excepto dígitos, punto y coma
+        num_str = re.sub(r"[^\d.,]", "", s)
+        num_str = num_str.replace(",", ".")
+        if not num_str:
+            raise ValueError(f"No pude interpretar el valor: '{raw}'")
+        return float(num_str), is_pct
+
     def _execute_price_change(
         self, params: Dict[str, Any], store_id: str
     ) -> Dict[str, Any]:
@@ -1227,8 +1242,9 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
         action = params.get("action", "set")
         scope = params.get("scope", "product")
         target = params.get("target")
-        value = float(params["value"])
-        is_pct = params.get("is_percentage", False)
+        parsed_value, detected_pct = self._parse_numeric_value(params["value"])
+        value = parsed_value
+        is_pct = params.get("is_percentage", detected_pct) if not detected_pct else True
 
         products = self._find_products_by_scope(store_id, scope, target)
         if not products:
@@ -1266,7 +1282,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
         self, params: Dict[str, Any], store_id: str
     ) -> Dict[str, Any]:
         """Aplica un descuento porcentual a productos (baja el base_price)."""
-        pct = float(params["percentage"])
+        pct, _ = self._parse_numeric_value(params["percentage"])
         scope = params.get("scope", "all")
         target = params.get("target")
 
@@ -1802,7 +1818,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 })
                 logger.info(f"Operación pendiente guardada [{operation_type}]: params={params}, missing={missing}")
 
-                # Para gasto sin categoría, mostrar opciones
+                # Para campos faltantes, mostrar opciones cuando aplique
                 questions_list = []
                 for field in missing:
                     q = config["questions"].get(field, f"¿Cuál es el {field}?")
@@ -1810,6 +1826,18 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                         cats = self._get_expense_categories(store_id)
                         options = "\n".join(f"  • {c}" for c in cats)
                         q = q.format(category_options=options)
+                    elif field == "target" and operation_type in ("price_change", "discount"):
+                        scope = params.get("scope", "product")
+                        if scope == "product":
+                            products = self._find_products_by_scope(store_id, "all", None)
+                            if products:
+                                product_list = "\n".join(
+                                    f"  • {p['name']} — ${p['base_price']:,.2f}"
+                                    for p in products[:20]
+                                )
+                                q = f"¿A qué producto le quieres cambiar el precio? Estos son tus productos:\n{product_list}"
+                                if len(products) > 20:
+                                    q += f"\n  ... y {len(products) - 20} más."
                     questions_list.append(q)
 
                 analysis = " ".join(questions_list)
