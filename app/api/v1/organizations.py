@@ -221,3 +221,33 @@ async def activate_module(
     await db.flush()
     await db.refresh(org)
     return {"status": "ok", "message": f"Módulo '{module_name}' activado"}
+
+
+@router.post("/modules/{module_name}/toggle")
+async def toggle_module(
+    module_name: str,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Activa o desactiva un módulo premium para la organización."""
+    allowed = {"restaurant", "warehouse"}
+    if module_name not in allowed:
+        raise HTTPException(status_code=400, detail=f"Módulo '{module_name}' no válido")
+
+    result = await db.execute(
+        select(Organization).where(
+            Organization.owner_id == current_user.id,
+            Organization.is_active.is_(True),
+        )
+    )
+    org = result.scalar_one_or_none()
+    if not org:
+        raise HTTPException(status_code=404, detail="No tienes una organización")
+
+    field = f"{module_name}_enabled"
+    current = getattr(org, field, False)
+    setattr(org, field, not current)
+    await db.flush()
+    await db.refresh(org)
+    new_state = "activado" if not current else "desactivado"
+    return {"status": "ok", "enabled": not current, "message": f"Módulo '{module_name}' {new_state}"}
