@@ -1160,65 +1160,79 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
     def _find_products_by_scope(
         self, store_id: str, scope: str, target: Optional[str]
     ) -> List[Dict[str, Any]]:
-        """Busca productos según scope (product/category/brand/all)."""
-        with self.db.connect() as conn:
-            if scope == "all":
-                rows = conn.execute(
-                    text("""
-                        SELECT p.id, p.name, p.base_price, c.name as category, b.name as brand
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        LEFT JOIN brands b ON p.brand_id = b.id
-                        WHERE p.store_id = CAST(:store_id AS uuid) AND p.is_active = true
-                        ORDER BY p.name
-                    """),
-                    {"store_id": store_id},
-                ).fetchall()
-            elif scope == "category":
-                rows = conn.execute(
-                    text("""
-                        SELECT p.id, p.name, p.base_price, c.name as category, b.name as brand
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        LEFT JOIN brands b ON p.brand_id = b.id
-                        WHERE p.store_id = CAST(:store_id AS uuid) AND p.is_active = true
-                          AND LOWER(c.name) LIKE '%' || LOWER(:target) || '%'
-                        ORDER BY p.name
-                    """),
-                    {"store_id": store_id, "target": target or ""},
-                ).fetchall()
-            elif scope == "brand":
-                rows = conn.execute(
-                    text("""
-                        SELECT p.id, p.name, p.base_price, c.name as category, b.name as brand
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        LEFT JOIN brands b ON p.brand_id = b.id
-                        WHERE p.store_id = CAST(:store_id AS uuid) AND p.is_active = true
-                          AND LOWER(b.name) LIKE '%' || LOWER(:target) || '%'
-                        ORDER BY p.name
-                    """),
-                    {"store_id": store_id, "target": target or ""},
-                ).fetchall()
-            else:  # product
-                rows = conn.execute(
-                    text("""
-                        SELECT p.id, p.name, p.base_price, c.name as category, b.name as brand
-                        FROM products p
-                        LEFT JOIN categories c ON p.category_id = c.id
-                        LEFT JOIN brands b ON p.brand_id = b.id
-                        WHERE p.store_id = CAST(:store_id AS uuid) AND p.is_active = true
-                          AND LOWER(p.name) LIKE '%' || LOWER(:target) || '%'
-                        ORDER BY p.name
-                    """),
-                    {"store_id": store_id, "target": target or ""},
-                ).fetchall()
+        """Busca productos según scope (product/category/brand/all).
 
+        Para scope product/category/brand usa búsqueda fuzzy de 3 niveles:
+        1. LIKE con normalización (guiones→espacios, sin acentos)
+        2. LIKE con stemming (sin plurales)
+        3. pg_trgm similarity >= 0.25 (tolerante a typos)
+        """
+        def _to_dicts(rows):
             return [
                 {"id": str(r[0]), "name": r[1], "base_price": float(r[2]),
                  "category": r[3], "brand": r[4]}
                 for r in rows
             ]
+
+        base_query = """
+            SELECT p.id, p.name, p.base_price, c.name as category, b.name as brand
+            FROM products p
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN brands b ON p.brand_id = b.id
+            WHERE p.store_id = CAST(:store_id AS uuid) AND p.is_active = true
+        """
+
+        with self.db.connect() as conn:
+            if scope == "all":
+                rows = conn.execute(
+                    text(base_query + " ORDER BY p.name"),
+                    {"store_id": store_id},
+                ).fetchall()
+                return _to_dicts(rows)
+
+            # Determinar columna y tabla según scope
+            if scope == "category":
+                col = "c.name"
+            elif scope == "brand":
+                col = "b.name"
+            else:  # product
+                col = "p.name"
+
+            normalized = self._normalize_for_search(target or "")
+            stemmed = self._stem_spanish(normalized)
+
+            # Tier 1: LIKE con normalización (guiones→espacios, sin acentos)
+            rows = conn.execute(
+                text(base_query + f"""
+                    AND LOWER(REPLACE({col}, '-', ' ')) LIKE '%' || LOWER(:term) || '%'
+                    ORDER BY p.name
+                """),
+                {"store_id": store_id, "term": normalized},
+            ).fetchall()
+            if rows:
+                return _to_dicts(rows)
+
+            # Tier 2: LIKE con stemming (sin plurales)
+            if stemmed != normalized:
+                rows = conn.execute(
+                    text(base_query + f"""
+                        AND LOWER(REPLACE({col}, '-', ' ')) LIKE '%' || LOWER(:term) || '%'
+                        ORDER BY p.name
+                    """),
+                    {"store_id": store_id, "term": stemmed},
+                ).fetchall()
+                if rows:
+                    return _to_dicts(rows)
+
+            # Tier 3: pg_trgm similarity (fuzzy match para typos y variaciones)
+            rows = conn.execute(
+                text(base_query + f"""
+                    AND similarity(LOWER({col}), LOWER(:term)) >= 0.25
+                    ORDER BY similarity(LOWER({col}), LOWER(:term)) DESC
+                """),
+                {"store_id": store_id, "term": normalized},
+            ).fetchall()
+            return _to_dicts(rows)
 
     @staticmethod
     def _parse_numeric_value(raw: Any) -> tuple[float, bool]:
@@ -1235,22 +1249,10 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             raise ValueError(f"No pude interpretar el valor: '{raw}'")
         return float(num_str), is_pct
 
-    def _execute_price_change(
-        self, params: Dict[str, Any], store_id: str
+    def _apply_price_change_to_products(
+        self, products: List[Dict[str, Any]], action: str, value: float, is_pct: bool
     ) -> Dict[str, Any]:
-        """Ejecuta el cambio de precio en productos."""
-        action = params.get("action", "set")
-        scope = params.get("scope", "product")
-        target = params.get("target")
-        parsed_value, detected_pct = self._parse_numeric_value(params["value"])
-        value = parsed_value
-        is_pct = params.get("is_percentage", detected_pct) if not detected_pct else True
-
-        products = self._find_products_by_scope(store_id, scope, target)
-        if not products:
-            scope_label = {"product": "producto", "category": "categoría", "brand": "marca", "all": "tienda"}.get(scope, scope)
-            raise ValueError(f"NO_PRODUCTS|No encontré productos para {scope_label}: '{target or 'todos'}'")
-
+        """Aplica el cambio de precio a una lista de productos ya seleccionados."""
         updated = []
         with self.db.connect() as conn:
             for p in products:
@@ -1264,7 +1266,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 else:
                     new_price = value
 
-                new_price = round(max(0, new_price), 2)  # No negativos
+                new_price = round(max(0, new_price), 2)
 
                 conn.execute(
                     text("UPDATE products SET base_price = :new_price WHERE id = CAST(:pid AS uuid)"),
@@ -1278,19 +1280,38 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
 
         return {"updated_count": len(updated), "products": updated}
 
-    def _execute_discount(
+    def _execute_price_change(
         self, params: Dict[str, Any], store_id: str
     ) -> Dict[str, Any]:
-        """Aplica un descuento porcentual a productos (baja el base_price)."""
-        pct, _ = self._parse_numeric_value(params["percentage"])
-        scope = params.get("scope", "all")
+        """Ejecuta el cambio de precio en productos."""
+        action = params.get("action", "set")
+        scope = params.get("scope", "product")
         target = params.get("target")
+        parsed_value, detected_pct = self._parse_numeric_value(params["value"])
+        value = parsed_value
+        is_pct = params.get("is_percentage", detected_pct) if not detected_pct else True
+
+        # Si ya hay productos pre-seleccionados (viene de selección de candidatos)
+        if params.get("_selected_products"):
+            return self._apply_price_change_to_products(
+                params["_selected_products"], action, value, is_pct
+            )
 
         products = self._find_products_by_scope(store_id, scope, target)
         if not products:
             scope_label = {"product": "producto", "category": "categoría", "brand": "marca", "all": "tienda"}.get(scope, scope)
             raise ValueError(f"NO_PRODUCTS|No encontré productos para {scope_label}: '{target or 'todos'}'")
 
+        # Si scope es product y hay múltiples coincidencias, pedir selección
+        if scope == "product" and len(products) > 1:
+            raise ValueError(f"MULTIPLE_MATCHES|{json.dumps(products, ensure_ascii=False)}")
+
+        return self._apply_price_change_to_products(products, action, value, is_pct)
+
+    def _apply_discount_to_products(
+        self, products: List[Dict[str, Any]], pct: float
+    ) -> Dict[str, Any]:
+        """Aplica descuento a una lista de productos ya seleccionados."""
         updated = []
         with self.db.connect() as conn:
             for p in products:
@@ -1309,6 +1330,29 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             conn.commit()
 
         return {"updated_count": len(updated), "discount_pct": pct, "products": updated}
+
+    def _execute_discount(
+        self, params: Dict[str, Any], store_id: str
+    ) -> Dict[str, Any]:
+        """Aplica un descuento porcentual a productos (baja el base_price)."""
+        pct, _ = self._parse_numeric_value(params["percentage"])
+        scope = params.get("scope", "all")
+        target = params.get("target")
+
+        # Si ya hay productos pre-seleccionados
+        if params.get("_selected_products"):
+            return self._apply_discount_to_products(params["_selected_products"], pct)
+
+        products = self._find_products_by_scope(store_id, scope, target)
+        if not products:
+            scope_label = {"product": "producto", "category": "categoría", "brand": "marca", "all": "tienda"}.get(scope, scope)
+            raise ValueError(f"NO_PRODUCTS|No encontré productos para {scope_label}: '{target or 'todos'}'")
+
+        # Si scope es product y hay múltiples coincidencias, pedir selección
+        if scope == "product" and len(products) > 1:
+            raise ValueError(f"MULTIPLE_MATCHES|{json.dumps(products, ensure_ascii=False)}")
+
+        return self._apply_discount_to_products(products, pct)
 
     def _execute_product_creation(
         self, params: Dict[str, Any], store_id: str
@@ -1554,6 +1598,94 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             else:
                 raise ValueError(f"Operación no soportada: {op_type}")
 
+    async def _ask_product_selection(
+        self,
+        candidates: List[Dict[str, Any]],
+        params: Dict[str, Any],
+        operation_type: str,
+        question: str,
+        store_id: str,
+        user_id: str,
+        skip_tts: bool,
+        start_time: datetime,
+    ) -> Dict[str, Any]:
+        """Cuando hay múltiples productos coincidentes, pregunta al usuario cuál(es) quiere."""
+        product_list = "\n".join(
+            f"  {i+1}. {p['name']} — ${p['base_price']:,.2f}"
+            for i, p in enumerate(candidates)
+        )
+        if len(candidates) == 2:
+            analysis = (
+                f"Encontré 2 productos que coinciden:\n{product_list}\n\n"
+                "¿A cuál le aplico el cambio? Puedes decir \"a ambos\", "
+                "o el nombre/número del producto."
+            )
+        else:
+            analysis = (
+                f"Encontré {len(candidates)} productos que coinciden:\n{product_list}\n\n"
+                "¿A cuál(es) le aplico el cambio? Puedes decir \"a todos\", "
+                "o el nombre/número del producto."
+            )
+
+        # Guardar como pendiente con los candidatos
+        self.memory.set_pending_op(user_id, store_id, {
+            "op_type": operation_type,
+            "params": params,
+            "missing": ["_product_selection"],
+            "_candidates": candidates,
+        })
+
+        audio_base64, tts_notice = (None, None)
+        if self.enable_tts and not skip_tts:
+            audio_base64, tts_notice = await self._generate_tts(analysis)
+        self.memory.update_history(user_id, question, analysis)
+
+        latency = (datetime.now() - start_time).total_seconds()
+        return {
+            "analysis": analysis, "chart": None, "data": [],
+            "related_questions": [],
+            "audio_base64": audio_base64, "tts_notice": tts_notice,
+            "ops_mode": True, "ops_type": operation_type, "ops_status": "pending",
+            "ai_history": {"tokens_used": 0, "cost_usd": 0,
+                "latency_seconds": round(latency, 2),
+                "intent": f"ops_{operation_type}", "model": self.default_model},
+        }
+
+    def _resolve_product_selection(
+        self, answer: str, candidates: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Resuelve la selección del usuario sobre candidatos de productos.
+
+        Soporta: "a todos", "ambos", número ("1", "2"), nombre del producto,
+        o múltiples separados por coma/y ("1 y 3", "coca cola y fanta").
+        """
+        ans = answer.strip().lower()
+
+        # "a todos", "todos", "ambos", "a ambos", "los dos", "a los dos"
+        if re.search(r"\b(todos|ambos|los\s+dos|todas|ambas)\b", ans):
+            return candidates
+
+        selected = []
+
+        # Intentar por número(s): "1", "2", "1 y 3", "1, 2"
+        nums = re.findall(r"\b(\d+)\b", ans)
+        if nums:
+            for n in nums:
+                idx = int(n) - 1
+                if 0 <= idx < len(candidates):
+                    selected.append(candidates[idx])
+            if selected:
+                return selected
+
+        # Intentar por nombre: fuzzy match con cada candidato
+        for candidate in candidates:
+            c_norm = self._normalize_for_search(candidate["name"])
+            a_norm = self._normalize_for_search(answer)
+            if c_norm.lower() in a_norm.lower() or a_norm.lower() in c_norm.lower():
+                selected.append(candidate)
+
+        return selected
+
     def _build_ops_confirmation(self, op_type: str, params: Dict[str, Any], result: Dict[str, Any]) -> str:
         """Genera el mensaje de confirmación para cualquier tipo de operación."""
         if op_type == "price_change":
@@ -1645,6 +1777,45 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             return self._error_response(f"Operación no reconocida: {op_type}")
 
         try:
+            # ── Manejo de selección de productos (múltiples coincidencias) ──
+            if "_product_selection" in missing and pending_op.get("_candidates"):
+                candidates = pending_op["_candidates"]
+                selected = self._resolve_product_selection(answer, candidates)
+
+                if not selected:
+                    # No se pudo resolver — volver a preguntar
+                    return await self._ask_product_selection(
+                        candidates=candidates,
+                        params=params,
+                        operation_type=op_type,
+                        question=answer,
+                        store_id=store_id,
+                        user_id=user_id,
+                        skip_tts=skip_tts,
+                        start_time=start_time,
+                    )
+
+                # Inyectar los productos seleccionados en params
+                params["_selected_products"] = selected
+                result = self._execute_ops_insert(op_type, params, store_id, user_id)
+                logger.info(f"Operación con selección completada: {result}")
+
+                analysis = self._build_ops_confirmation(op_type, params, result)
+                audio_base64, tts_notice = (None, None)
+                if self.enable_tts and not skip_tts:
+                    audio_base64, tts_notice = await self._generate_tts(analysis)
+                self.memory.update_history(user_id, answer, analysis)
+                latency = (datetime.now() - start_time).total_seconds()
+                return {
+                    "analysis": analysis, "chart": None, "data": [result],
+                    "related_questions": ["¿Cuánto tengo en caja?", "¿Cuánto vendí hoy?"],
+                    "audio_base64": audio_base64, "tts_notice": tts_notice,
+                    "ops_mode": True, "ops_type": op_type, "ops_status": "completed",
+                    "ai_history": {"tokens_used": 0, "cost_usd": 0,
+                        "latency_seconds": round(latency, 2),
+                        "intent": f"ops_{op_type}", "model": self.default_model},
+                }
+
             # Si solo falta 1 campo, la respuesta del usuario es directamente el valor
             if len(missing) == 1:
                 field = missing[0]
@@ -1732,6 +1903,18 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                     )
                 elif msg.startswith("NO_PRODUCTS|"):
                     analysis = msg.split("|", 1)[1]
+                elif msg.startswith("MULTIPLE_MATCHES|"):
+                    candidates = json.loads(msg.split("|", 1)[1])
+                    return await self._ask_product_selection(
+                        candidates=candidates,
+                        params=params,
+                        operation_type=op_type,
+                        question=answer,
+                        store_id=store_id,
+                        user_id=user_id,
+                        skip_tts=skip_tts,
+                        start_time=start_time,
+                    )
                 else:
                     raise
                 audio_base64, tts_notice = (None, None)
@@ -1883,6 +2066,19 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                     )
                 elif msg.startswith("NO_PRODUCTS|"):
                     analysis = msg.split("|", 1)[1]
+                elif msg.startswith("MULTIPLE_MATCHES|"):
+                    # Múltiples productos encontrados → pedir selección al usuario
+                    candidates = json.loads(msg.split("|", 1)[1])
+                    return await self._ask_product_selection(
+                        candidates=candidates,
+                        params=params,
+                        operation_type=operation_type,
+                        question=question,
+                        store_id=store_id,
+                        user_id=user_id,
+                        skip_tts=skip_tts,
+                        start_time=start_time,
+                    )
                 else:
                     raise
                 audio_base64, tts_notice = (None, None)
