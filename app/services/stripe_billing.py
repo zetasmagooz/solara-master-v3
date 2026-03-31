@@ -263,9 +263,11 @@ class StripeBillingService:
             payment_behavior="error_if_incomplete",
         )
 
-        # Extraer fechas del periodo de Stripe
-        period_start = datetime.fromtimestamp(sub.current_period_start, tz=timezone.utc) if sub.current_period_start else datetime.now(timezone.utc)
-        period_end = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc) if sub.current_period_end else None
+        # Extraer fechas del periodo de Stripe (acceder como dict por compatibilidad)
+        raw_start = sub.get("current_period_start") if hasattr(sub, "get") else getattr(sub, "current_period_start", None)
+        raw_end = sub.get("current_period_end") if hasattr(sub, "get") else getattr(sub, "current_period_end", None)
+        period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
+        period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else None
 
         # Crear OrganizationSubscription con fechas del periodo pagado
         org_sub = OrganizationSubscription(
@@ -282,9 +284,9 @@ class StripeBillingService:
         stripe_sub = StripeSubscription(
             organization_id=organization_id,
             org_subscription_id=org_sub.id,
-            stripe_subscription_id=sub.id,
+            stripe_subscription_id=sub.id if isinstance(sub.id, str) else sub["id"],
             stripe_price_id=plan.stripe_price_id,
-            status=sub.status,
+            status=sub.get("status") if hasattr(sub, "get") else getattr(sub, "status", "active"),
             current_period_start=period_start,
             current_period_end=period_end,
         )
