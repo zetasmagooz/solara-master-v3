@@ -270,14 +270,15 @@ class StripeBillingService:
             item_data = items.get("data", []) if items else []
 
             if item_data:
-                # Cambiar el plan en la misma suscripción → Stripe aplica prorrateo automático
+                # Cambiar el plan — always_invoice genera factura inmediata SOLO con la diferencia
+                # El siguiente cobro regular se hace en la fecha de renovación normal
                 sub = stripe.Subscription.modify(
                     existing_sub.stripe_subscription_id,
                     items=[{
                         "id": self._get_sub_field(item_data[0], "id"),
                         "price": plan.stripe_price_id,
                     }],
-                    proration_behavior="create_prorations",
+                    proration_behavior="always_invoice",
                     payment_behavior="error_if_incomplete",
                 )
             else:
