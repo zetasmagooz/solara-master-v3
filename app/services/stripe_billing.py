@@ -245,22 +245,22 @@ class StripeBillingService:
             existing_sub.status = "cancelled"
             await self.db.flush()
 
-        # Cancelar org subscription actual
+        # Cancelar org subscription actual (trial, active o expired)
         await self.db.execute(
             update(OrganizationSubscription)
             .where(
                 OrganizationSubscription.organization_id == organization_id,
-                OrganizationSubscription.status.in_(["trial", "active"]),
+                OrganizationSubscription.status.in_(["trial", "active", "expired"]),
             )
             .values(status="cancelled", updated_at=datetime.now(timezone.utc))
         )
 
-        # Crear suscripción en Stripe
+        # Crear suscripción en Stripe — cobro automático con tarjeta guardada
         sub = stripe.Subscription.create(
             customer=sc.stripe_customer_id,
             items=[{"price": plan.stripe_price_id}],
-            payment_behavior="default_incomplete",
-            expand=["latest_invoice.payment_intent"],
+            default_payment_method=pms[0].stripe_pm_id if pms else None,
+            payment_behavior="error_if_incomplete",
         )
 
         # Crear OrganizationSubscription
