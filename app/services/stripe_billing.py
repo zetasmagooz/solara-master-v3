@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import stripe
 from sqlalchemy import select, update
@@ -222,9 +222,24 @@ class StripeBillingService:
 
     def _get_sub_field(self, sub: any, field: str, default=None):
         """Acceso seguro a campos del objeto Stripe (compatible con dict y StripeObject)."""
+        # StripeObject soporta acceso por [] como dict
+        try:
+            val = sub[field]
+            return val if val is not None else default
+        except (KeyError, TypeError, AttributeError):
+            pass
         if hasattr(sub, "get"):
             return sub.get(field, default)
         return getattr(sub, field, default)
+
+    def _extract_period(self, sub: any) -> tuple[datetime, datetime]:
+        """Extrae period_start y period_end de un objeto Stripe Subscription."""
+        raw_start = self._get_sub_field(sub, "current_period_start")
+        raw_end = self._get_sub_field(sub, "current_period_end")
+        period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
+        # Stripe siempre devuelve period_end, pero si no lo tenemos, fallback 30 días
+        period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else (period_start + timedelta(days=30))
+        return period_start, period_end
 
     async def create_subscription(self, organization_id: uuid.UUID, plan_slug: str) -> StripeSubscription:
         """Crea o cambia una suscripción en Stripe con prorrateo automático."""
@@ -278,10 +293,7 @@ class StripeBillingService:
                 )
 
             # Actualizar StripeSubscription existente
-            raw_start = self._get_sub_field(sub, "current_period_start")
-            raw_end = self._get_sub_field(sub, "current_period_end")
-            period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
-            period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else None
+            period_start, period_end = self._extract_period(sub)
 
             existing_sub.stripe_price_id = plan.stripe_price_id
             existing_sub.status = self._get_sub_field(sub, "status") or "active"
@@ -325,10 +337,7 @@ class StripeBillingService:
             payment_behavior="error_if_incomplete",
         )
 
-        raw_start = self._get_sub_field(sub, "current_period_start")
-        raw_end = self._get_sub_field(sub, "current_period_end")
-        period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
-        period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else None
+        period_start, period_end = self._extract_period(sub)
 
         # Crear OrganizationSubscription
         org_sub = OrganizationSubscription(
