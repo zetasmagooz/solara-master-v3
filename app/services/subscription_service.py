@@ -25,11 +25,12 @@ class SubscriptionService:
         return result.scalar_one_or_none()
 
     async def get_current_subscription(self, organization_id: uuid.UUID) -> OrganizationSubscription | None:
+        """Obtiene la suscripción más reciente (trial, active o expired)."""
         result = await self.db.execute(
             select(OrganizationSubscription)
             .where(
                 OrganizationSubscription.organization_id == organization_id,
-                OrganizationSubscription.status.in_(["trial", "active"]),
+                OrganizationSubscription.status.in_(["trial", "active", "expired"]),
             )
             .options(selectinload(OrganizationSubscription.plan))
             .order_by(OrganizationSubscription.created_at.desc())
@@ -90,33 +91,13 @@ class SubscriptionService:
         return result.scalar_one()
 
     async def expire_trial_if_needed(self, organization_id: uuid.UUID) -> OrganizationSubscription | None:
-        """Si el trial expiró, auto-downgrade a Starter."""
+        """Si el trial expiró, marcarlo como expired. El usuario debe elegir un plan."""
         current = await self.get_current_subscription(organization_id)
         if not current:
             return None
 
         if current.status == "trial" and current.expires_at and current.expires_at < datetime.now(timezone.utc):
-            # Expirar trial
             current.status = "expired"
             await self.db.flush()
-
-            # Crear suscripción Starter gratuita
-            starter = await self.get_plan_by_slug("starter")
-            if starter:
-                sub = OrganizationSubscription(
-                    organization_id=organization_id,
-                    plan_id=starter.id,
-                    status="active",
-                    started_at=datetime.now(timezone.utc),
-                )
-                self.db.add(sub)
-                await self.db.flush()
-
-                result = await self.db.execute(
-                    select(OrganizationSubscription)
-                    .where(OrganizationSubscription.id == sub.id)
-                    .options(selectinload(OrganizationSubscription.plan))
-                )
-                return result.scalar_one()
 
         return current

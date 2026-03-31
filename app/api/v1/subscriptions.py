@@ -45,7 +45,8 @@ async def get_current_subscription(
     service = SubscriptionService(db)
     sub = await service.expire_trial_if_needed(current_user.organization_id)
     if not sub:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No tienes una suscripción activa")
+        # Sin suscripción — retornar respuesta con status expired para que el frontend muestre el modal
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="no_subscription")
     return sub
 
 
