@@ -92,6 +92,7 @@ async def ask(
             temperature=body.temperature or 0.0,
             skip_tts=True,
             sale_session_id=body.sale_session_id,
+            locale=body.locale or "es",
         )
 
         ai_history = result.get("ai_history") or {}

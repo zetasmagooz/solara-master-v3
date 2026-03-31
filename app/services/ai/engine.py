@@ -134,6 +134,50 @@ class OptimizedAIEngine:
         Responde en JSON con: sql, params, validation, interpretation.
         """
 
+    async def _translate_to_spanish(self, text: str) -> str:
+        """Traduce una pregunta en inglés a español usando el LLM."""
+        try:
+            result = await self.client.chat(
+                messages=[
+                    {"role": "system", "content": (
+                        "You are a translator. Translate the following text from English to Spanish. "
+                        "Return ONLY the Spanish translation, nothing else. Keep product names, brand names "
+                        "and proper nouns as-is. Be natural and concise."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                model=self.default_model,
+                temperature=0.0,
+                max_tokens=300,
+            )
+            translated = result.get("text", text) if isinstance(result, dict) else str(result)
+            return translated.strip()
+        except Exception as e:
+            logger.error(f"Error traduciendo a español: {e}")
+            return text
+
+    async def _translate_to_english(self, text: str) -> str:
+        """Traduce una respuesta en español a inglés usando el LLM."""
+        try:
+            result = await self.client.chat(
+                messages=[
+                    {"role": "system", "content": (
+                        "You are a translator. Translate the following text from Spanish to English. "
+                        "Return ONLY the English translation, nothing else. Keep product names, brand names, "
+                        "proper nouns and currency formats (e.g. $1,234.00 MXN) as-is. Be natural and concise."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                model=self.default_model,
+                temperature=0.0,
+                max_tokens=500,
+            )
+            translated = result.get("text", text) if isinstance(result, dict) else str(result)
+            return translated.strip()
+        except Exception as e:
+            logger.error(f"Error traduciendo a inglés: {e}")
+            return text
+
     async def ask(
         self,
         question: str,
@@ -143,11 +187,51 @@ class OptimizedAIEngine:
         temperature: float = 0.0,
         skip_tts: bool = False,
         sale_session_id: Optional[str] = None,
+        locale: str = "es",
     ) -> Dict[str, Any]:
         start_time = datetime.now()
         user_id = user_id or "anonymous"
         hints = hints or {}
 
+        # Si el idioma es inglés, traducir la pregunta a español para el pipeline
+        original_question = question
+        is_english = locale == "en"
+        if is_english:
+            question = await self._translate_to_spanish(question)
+            logger.info(f"[LOCALE] Traducida EN→ES: {original_question!r} → {question!r}")
+
+        try:
+          result = await self._ask_internal(
+              question=question,
+              store_id=store_id,
+              user_id=user_id,
+              hints=hints,
+              temperature=temperature,
+              skip_tts=skip_tts,
+              sale_session_id=sale_session_id,
+              start_time=start_time,
+          )
+        except Exception as e:
+            logger.exception(f"Error en ask: {e}")
+            result = self._error_response(str(e))
+
+        # Si el idioma es inglés, traducir la respuesta
+        if is_english and result.get("analysis"):
+            result["analysis"] = await self._translate_to_english(result["analysis"])
+
+        return result
+
+    async def _ask_internal(
+        self,
+        question: str,
+        store_id: str,
+        user_id: str,
+        hints: Dict[str, Any],
+        temperature: float,
+        skip_tts: bool,
+        sale_session_id: Optional[str],
+        start_time: datetime,
+    ) -> Dict[str, Any]:
         try:
             # ── Verificar si hay una sesión de venta activa ──
             sale_session = self.memory.get_sale_session(user_id, store_id)
@@ -368,7 +452,7 @@ class OptimizedAIEngine:
             return response
 
         except Exception as e:
-            logger.exception(f"Error en ask: {e}")
+            logger.exception(f"Error en _ask_internal: {e}")
             return self._error_response(str(e))
 
     def _detect_intent(self, question: str, hints: Dict[str, Any]) -> Optional[str]:

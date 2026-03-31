@@ -11,6 +11,7 @@ class AskRequest(BaseModel):
     hints: Optional[Dict[str, Any]] = Field(None, description="Hints adicionales")
     include_audio: Optional[bool] = Field(False, description="Generar audio TTS")
     sale_session_id: Optional[str] = Field(None, description="ID sesión de venta activa")
+    locale: Optional[str] = Field("es", description="Idioma del usuario: 'es' o 'en'")
 
 
 class AskResponse(BaseModel):
