@@ -220,8 +220,14 @@ class StripeBillingService:
 
     # ─── Subscriptions ───────────────────────────────────────
 
+    def _get_sub_field(self, sub: any, field: str, default=None):
+        """Acceso seguro a campos del objeto Stripe (compatible con dict y StripeObject)."""
+        if hasattr(sub, "get"):
+            return sub.get(field, default)
+        return getattr(sub, field, default)
+
     async def create_subscription(self, organization_id: uuid.UUID, plan_slug: str) -> StripeSubscription:
-        """Crea una suscripción en Stripe y la vincula con OrganizationSubscription."""
+        """Crea o cambia una suscripción en Stripe con prorrateo automático."""
         _require_stripe_keys()
         # Obtener plan
         plan_result = await self.db.execute(select(Plan).where(Plan.slug == plan_slug, Plan.is_active.is_(True)))
@@ -238,14 +244,69 @@ class StripeBillingService:
         if not pms:
             raise ValueError("Debes agregar un método de pago antes de suscribirte")
 
-        # Cancelar suscripción Stripe existente si hay una
+        default_pm = pms[0].stripe_pm_id
+
+        # ── Si ya tiene suscripción activa en Stripe → cambio de plan con prorrateo ──
         existing_sub = await self._get_active_stripe_subscription(organization_id)
         if existing_sub:
-            stripe.Subscription.cancel(existing_sub.stripe_subscription_id)
-            existing_sub.status = "cancelled"
-            await self.db.flush()
+            # Obtener la suscripción de Stripe para saber el item_id
+            stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
+            items = self._get_sub_field(stripe_sub_obj, "items")
+            item_data = items.get("data", []) if items else []
 
-        # Cancelar org subscription actual (trial, active o expired)
+            if item_data:
+                # Cambiar el plan en la misma suscripción → Stripe aplica prorrateo automático
+                sub = stripe.Subscription.modify(
+                    existing_sub.stripe_subscription_id,
+                    items=[{
+                        "id": self._get_sub_field(item_data[0], "id"),
+                        "price": plan.stripe_price_id,
+                    }],
+                    proration_behavior="create_prorations",
+                    payment_behavior="error_if_incomplete",
+                )
+            else:
+                # Fallback: cancelar y crear nueva
+                stripe.Subscription.cancel(existing_sub.stripe_subscription_id)
+                existing_sub.status = "cancelled"
+                await self.db.flush()
+                sub = stripe.Subscription.create(
+                    customer=sc.stripe_customer_id,
+                    items=[{"price": plan.stripe_price_id}],
+                    default_payment_method=default_pm,
+                    payment_behavior="error_if_incomplete",
+                )
+
+            # Actualizar StripeSubscription existente
+            raw_start = self._get_sub_field(sub, "current_period_start")
+            raw_end = self._get_sub_field(sub, "current_period_end")
+            period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
+            period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else None
+
+            existing_sub.stripe_price_id = plan.stripe_price_id
+            existing_sub.status = self._get_sub_field(sub, "status") or "active"
+            existing_sub.current_period_start = period_start
+            existing_sub.current_period_end = period_end
+
+            # Actualizar OrganizationSubscription con nuevo plan
+            if existing_sub.org_subscription_id:
+                org_sub_result = await self.db.execute(
+                    select(OrganizationSubscription).where(OrganizationSubscription.id == existing_sub.org_subscription_id)
+                )
+                org_sub = org_sub_result.scalar_one_or_none()
+                if org_sub:
+                    org_sub.plan_id = plan.id
+                    org_sub.status = "active"
+                    org_sub.started_at = period_start
+                    org_sub.expires_at = period_end
+                    org_sub.updated_at = datetime.now(timezone.utc)
+
+            await self.db.flush()
+            return existing_sub
+
+        # ── Nueva suscripción (no tenía una activa en Stripe) ──
+
+        # Cancelar org subscriptions anteriores (trial, active, expired)
         await self.db.execute(
             update(OrganizationSubscription)
             .where(
@@ -255,21 +316,20 @@ class StripeBillingService:
             .values(status="cancelled", updated_at=datetime.now(timezone.utc))
         )
 
-        # Crear suscripción en Stripe — cobro automático con tarjeta guardada
+        # Crear suscripción en Stripe
         sub = stripe.Subscription.create(
             customer=sc.stripe_customer_id,
             items=[{"price": plan.stripe_price_id}],
-            default_payment_method=pms[0].stripe_pm_id if pms else None,
+            default_payment_method=default_pm,
             payment_behavior="error_if_incomplete",
         )
 
-        # Extraer fechas del periodo de Stripe (acceder como dict por compatibilidad)
-        raw_start = sub.get("current_period_start") if hasattr(sub, "get") else getattr(sub, "current_period_start", None)
-        raw_end = sub.get("current_period_end") if hasattr(sub, "get") else getattr(sub, "current_period_end", None)
+        raw_start = self._get_sub_field(sub, "current_period_start")
+        raw_end = self._get_sub_field(sub, "current_period_end")
         period_start = datetime.fromtimestamp(raw_start, tz=timezone.utc) if raw_start else datetime.now(timezone.utc)
         period_end = datetime.fromtimestamp(raw_end, tz=timezone.utc) if raw_end else None
 
-        # Crear OrganizationSubscription con fechas del periodo pagado
+        # Crear OrganizationSubscription
         org_sub = OrganizationSubscription(
             organization_id=organization_id,
             plan_id=plan.id,
@@ -284,9 +344,9 @@ class StripeBillingService:
         stripe_sub = StripeSubscription(
             organization_id=organization_id,
             org_subscription_id=org_sub.id,
-            stripe_subscription_id=sub.id if isinstance(sub.id, str) else sub["id"],
+            stripe_subscription_id=self._get_sub_field(sub, "id"),
             stripe_price_id=plan.stripe_price_id,
-            status=sub.get("status") if hasattr(sub, "get") else getattr(sub, "status", "active"),
+            status=self._get_sub_field(sub, "status") or "active",
             current_period_start=period_start,
             current_period_end=period_end,
         )
