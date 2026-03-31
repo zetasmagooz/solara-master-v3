@@ -263,12 +263,17 @@ class StripeBillingService:
             payment_behavior="error_if_incomplete",
         )
 
-        # Crear OrganizationSubscription
+        # Extraer fechas del periodo de Stripe
+        period_start = datetime.fromtimestamp(sub.current_period_start, tz=timezone.utc) if sub.current_period_start else datetime.now(timezone.utc)
+        period_end = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc) if sub.current_period_end else None
+
+        # Crear OrganizationSubscription con fechas del periodo pagado
         org_sub = OrganizationSubscription(
             organization_id=organization_id,
             plan_id=plan.id,
             status="active",
-            started_at=datetime.now(timezone.utc),
+            started_at=period_start,
+            expires_at=period_end,
         )
         self.db.add(org_sub)
         await self.db.flush()
@@ -280,8 +285,8 @@ class StripeBillingService:
             stripe_subscription_id=sub.id,
             stripe_price_id=plan.stripe_price_id,
             status=sub.status,
-            current_period_start=datetime.fromtimestamp(sub.current_period_start, tz=timezone.utc) if sub.current_period_start else None,
-            current_period_end=datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc) if sub.current_period_end else None,
+            current_period_start=period_start,
+            current_period_end=period_end,
         )
         self.db.add(stripe_sub)
         await self.db.flush()
@@ -314,7 +319,7 @@ class StripeBillingService:
     # ─── Webhook Handlers ────────────────────────────────────
 
     async def handle_invoice_paid(self, stripe_invoice: dict) -> None:
-        """Procesa invoice.payment_succeeded."""
+        """Procesa invoice.payment_succeeded — registra factura y actualiza fechas de suscripción."""
         stripe_sub_id = stripe_invoice.get("subscription")
         if not stripe_sub_id:
             return
@@ -326,6 +331,7 @@ class StripeBillingService:
         if not sub:
             return
 
+        # Registrar factura
         invoice = StripeInvoice(
             stripe_subscription_id=sub.id,
             stripe_invoice_id=stripe_invoice["id"],
@@ -336,6 +342,30 @@ class StripeBillingService:
             paid_at=datetime.now(timezone.utc),
         )
         self.db.add(invoice)
+
+        # Actualizar fechas del periodo en StripeSubscription
+        lines = stripe_invoice.get("lines", {}).get("data", [])
+        if lines:
+            line = lines[0].get("period", {})
+            if line.get("start"):
+                sub.current_period_start = datetime.fromtimestamp(line["start"], tz=timezone.utc)
+            if line.get("end"):
+                sub.current_period_end = datetime.fromtimestamp(line["end"], tz=timezone.utc)
+
+        sub.status = "active"
+
+        # Actualizar OrganizationSubscription — marcar activa con fechas del periodo pagado
+        if sub.org_subscription_id:
+            org_sub_result = await self.db.execute(
+                select(OrganizationSubscription).where(OrganizationSubscription.id == sub.org_subscription_id)
+            )
+            org_sub = org_sub_result.scalar_one_or_none()
+            if org_sub:
+                org_sub.status = "active"
+                org_sub.started_at = sub.current_period_start or datetime.now(timezone.utc)
+                org_sub.expires_at = sub.current_period_end
+                org_sub.updated_at = datetime.now(timezone.utc)
+
         await self.db.flush()
 
     async def handle_invoice_failed(self, stripe_invoice: dict) -> None:
@@ -363,7 +393,7 @@ class StripeBillingService:
         await self.db.flush()
 
     async def handle_subscription_updated(self, stripe_sub: dict) -> None:
-        """Procesa customer.subscription.updated."""
+        """Procesa customer.subscription.updated — sincroniza estado y fechas."""
         result = await self.db.execute(
             select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
         )
@@ -377,10 +407,25 @@ class StripeBillingService:
             sub.current_period_start = datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc)
         if stripe_sub.get("current_period_end"):
             sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
+
+        # Sincronizar con OrganizationSubscription
+        if sub.org_subscription_id:
+            org_sub_result = await self.db.execute(
+                select(OrganizationSubscription).where(OrganizationSubscription.id == sub.org_subscription_id)
+            )
+            org_sub = org_sub_result.scalar_one_or_none()
+            if org_sub:
+                # Mapear status de Stripe a nuestro status
+                status_map = {"active": "active", "past_due": "active", "canceled": "cancelled", "unpaid": "expired"}
+                org_sub.status = status_map.get(stripe_sub["status"], org_sub.status)
+                org_sub.started_at = sub.current_period_start or org_sub.started_at
+                org_sub.expires_at = sub.current_period_end
+                org_sub.updated_at = datetime.now(timezone.utc)
+
         await self.db.flush()
 
     async def handle_subscription_deleted(self, stripe_sub: dict) -> None:
-        """Procesa customer.subscription.deleted — downgrade a Starter."""
+        """Procesa customer.subscription.deleted — marcar como expired, usuario debe re-suscribirse."""
         result = await self.db.execute(
             select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
         )
@@ -390,24 +435,13 @@ class StripeBillingService:
 
         sub.status = "cancelled"
 
-        # Downgrade a Starter
-        starter_result = await self.db.execute(select(Plan).where(Plan.slug == "starter"))
-        starter = starter_result.scalar_one_or_none()
-        if starter:
-            # Cancelar org subscription actual
+        # Marcar org subscription como expired
+        if sub.org_subscription_id:
             await self.db.execute(
                 update(OrganizationSubscription)
                 .where(OrganizationSubscription.id == sub.org_subscription_id)
-                .values(status="cancelled", updated_at=datetime.now(timezone.utc))
+                .values(status="expired", updated_at=datetime.now(timezone.utc))
             )
-            # Crear suscripción Starter
-            org_sub = OrganizationSubscription(
-                organization_id=sub.organization_id,
-                plan_id=starter.id,
-                status="active",
-                started_at=datetime.now(timezone.utc),
-            )
-            self.db.add(org_sub)
 
         await self.db.flush()
 
