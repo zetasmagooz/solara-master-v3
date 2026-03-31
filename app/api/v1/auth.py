@@ -124,13 +124,15 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
     if auto_detected_store:
         tokens["auto_detected_store"] = auto_detected_store
 
-    # Auto-asignar trial Ultimate si el owner no tiene suscripción
+    # Auto-asignar trial Ultimate solo si es owner y NUNCA ha tenido suscripción
     if user.is_owner and user.organization_id:
         sub_service = SubscriptionService(db)
         current_sub = await sub_service.get_current_subscription(user.organization_id)
         if not current_sub:
-            await sub_service.create_trial_subscription(user.organization_id)
-            tokens["subscription_created"] = True
+            has_history = await sub_service.has_subscription_history(user.organization_id)
+            if not has_history:
+                await sub_service.create_trial_subscription(user.organization_id)
+                tokens["subscription_created"] = True
 
     await db.commit()
     return tokens

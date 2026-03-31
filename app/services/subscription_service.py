@@ -38,6 +38,15 @@ class SubscriptionService:
         )
         return result.scalar_one_or_none()
 
+    async def has_subscription_history(self, organization_id: uuid.UUID) -> bool:
+        """Verifica si la org alguna vez tuvo una suscripción (incluyendo cancelled/expired)."""
+        result = await self.db.execute(
+            select(OrganizationSubscription.id)
+            .where(OrganizationSubscription.organization_id == organization_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def create_trial_subscription(self, organization_id: uuid.UUID) -> OrganizationSubscription:
         """Crea suscripción trial Ultimate para una org recién creada."""
         ultimate = await self.get_plan_by_slug("ultimate")
