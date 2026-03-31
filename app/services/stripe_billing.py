@@ -302,6 +302,7 @@ class StripeBillingService:
                     org_sub.updated_at = datetime.now(timezone.utc)
 
             await self.db.flush()
+            await self.db.refresh(existing_sub)
             return existing_sub
 
         # ── Nueva suscripción (no tenía una activa en Stripe) ──
@@ -352,6 +353,7 @@ class StripeBillingService:
         )
         self.db.add(stripe_sub)
         await self.db.flush()
+        await self.db.refresh(stripe_sub)
         return stripe_sub
 
     async def cancel_subscription(self, organization_id: uuid.UUID) -> StripeSubscription:
