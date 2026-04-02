@@ -132,6 +132,7 @@ async def list_organization_stores(
     org_id: UUID,
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    include_inactive: bool = False,
 ):
     """Listar tiendas de la organización.
 
@@ -149,7 +150,7 @@ async def list_organization_stores(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a esta organización")
 
     service = OrganizationService(db)
-    return await service.list_stores(org_id)
+    return await service.list_stores(org_id, include_inactive=include_inactive)
 
 
 @router.post("/stores/{target_store_id}/copy-catalog")

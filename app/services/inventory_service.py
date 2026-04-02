@@ -245,14 +245,14 @@ class InventoryService:
         }
 
     async def create_inventory_entry(
-        self, store_id: uuid.UUID, user_id: uuid.UUID, data: InventoryEntryCreate
+        self, store_id: uuid.UUID, user_id: uuid.UUID, data: InventoryEntryCreate, locale: str = "es"
     ) -> InventoryEntryResponse:
         """Registra un movimiento de inventario (ingreso/egreso/reemplazo)."""
         movement = data.movement_type.value
         reason_map = {
-            "ingreso": "Entrada de inventario",
-            "egreso": "Egreso de inventario",
-            "reemplazo": "Reemplazo de stock",
+            "ingreso": "Stock entry" if locale == "en" else "Entrada de inventario",
+            "egreso": "Stock exit" if locale == "en" else "Egreso de inventario",
+            "reemplazo": "Stock replacement" if locale == "en" else "Reemplazo de stock",
         }
         reason = reason_map.get(movement, movement)
         if data.supplier_name:
@@ -345,14 +345,14 @@ class InventoryService:
         )
 
     async def create_supply_entry(
-        self, store_id: uuid.UUID, user_id: uuid.UUID, data: SupplyEntryCreate
+        self, store_id: uuid.UUID, user_id: uuid.UUID, data: SupplyEntryCreate, locale: str = "es"
     ) -> SupplyEntryResponse:
         """Registra un movimiento de insumos (ingreso/egreso/reemplazo)."""
         movement = data.movement_type.value
         reason_map = {
-            "ingreso": "Entrada de insumos",
-            "egreso": "Egreso de insumos",
-            "reemplazo": "Reemplazo de stock de insumos",
+            "ingreso": "Supply entry" if locale == "en" else "Entrada de insumos",
+            "egreso": "Supply exit" if locale == "en" else "Egreso de insumos",
+            "reemplazo": "Supply stock replacement" if locale == "en" else "Reemplazo de stock de insumos",
         }
         reason = reason_map.get(movement, movement)
         if data.supplier_name:

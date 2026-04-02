@@ -17,12 +17,13 @@ async def ia_summary(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user)],
+    locale: str = Query("es", description="Idioma: es | en"),
 ):
     """Genera un resumen de ventas con insights de IA para el dashboard.
 
     **Ejemplo curl:**
     ```bash
-    curl -X GET "http://66.179.92.115:8005/api/v1/dashboard/ia-summary?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff" \\
+    curl -X GET "http://66.179.92.115:8005/api/v1/dashboard/ia-summary?store_id=d54c2c80-f76d-4717-be91-5cfbea4cbfff&locale=en" \\
       -H "Authorization: Bearer {token}"
     ```
     """
@@ -33,4 +34,4 @@ async def ia_summary(
         user_name = result.scalar() or ""
 
     service = SaleService(db)
-    return await service.get_ia_dashboard_summary(store_id, user_name=user_name)
+    return await service.get_ia_dashboard_summary(store_id, user_name=user_name, locale=locale)

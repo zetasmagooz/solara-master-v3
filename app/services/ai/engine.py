@@ -22,7 +22,7 @@ import re
 import unicodedata
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -254,21 +254,66 @@ class OptimizedAIEngine:
             # ── Verificar si hay una operación pendiente ──
             pending_op = self.memory.get_pending_op(user_id, store_id)
             if pending_op:
-                logger.info(f"Operación pendiente encontrada: {pending_op['op_type']}, respondiendo con: {question}")
-                return await self._resume_pending_ops(
-                    pending_op=pending_op,
-                    answer=question,
-                    store_id=store_id,
-                    user_id=user_id,
-                    skip_tts=skip_tts,
-                    start_time=start_time,
-                )
+                q_lower = question.lower().strip()
 
-            # Clasificar consulta
-            query_type = self.intent_detector.detect_query_type(question)
-            route_type = query_type.get("type")
-            route_data = query_type.get("data")
-            logger.info(f"Query type: {route_type}, data: {route_data}")
+                # Cancelación explícita
+                if re.search(r"\b(cancela|cancelar|salir|no\s+quiero|dejalo|olvida|olvidalo|ya\s+no)\b", q_lower):
+                    self.memory.clear_pending_op(user_id, store_id)
+                    op_label = pending_op.get("op_type", "operación")
+                    logger.info(f"Operación pendiente cancelada por usuario: {op_label}")
+                    return {
+                        "analysis": f"Entendido, he cancelado el proceso de {op_label}. ¿En qué más te puedo ayudar?",
+                        "data": [],
+                        "ops_mode": True,
+                        "ops_status": "cancelled",
+                    }
+
+                # Detectar si el usuario cambió de tema — solo si es CLARAMENTE otro intent
+                # Respuestas cortas (1-3 palabras) casi siempre son respuestas al pending
+                word_count = len(q_lower.split())
+                is_short_answer = word_count <= 4
+
+                is_different_intent = False
+                if not is_short_answer:
+                    new_query_type = self.intent_detector.detect_query_type(question)
+                    new_route = new_query_type.get("type")
+                    new_data = new_query_type.get("data")
+                    is_different_intent = (
+                        new_route in ("sql", "sale", "greeting", "farewell", "help")
+                        or self.intent_detector._is_analytics_query(q_lower)
+                        or (new_route == "ops" and new_data != pending_op.get("op_type"))
+                    )
+
+                if is_different_intent:
+                    self.memory.clear_pending_op(user_id, store_id)
+                    logger.info(f"Operación pendiente cancelada por cambio de tema: {pending_op['op_type']} → {new_route}/{new_data}")
+                    # No retornar, dejar que fluya al clasificador normal abajo
+                else:
+                    logger.info(f"Operación pendiente encontrada: {pending_op['op_type']}, respondiendo con: {question}")
+                    return await self._resume_pending_ops(
+                        pending_op=pending_op,
+                        answer=question,
+                        store_id=store_id,
+                        user_id=user_id,
+                        skip_tts=skip_tts,
+                        start_time=start_time,
+                    )
+
+            # ── Follow-up de tiempo: ANTES de clasificar ──
+            # Si la pregunta contiene un indicador temporal y hay historial SQL,
+            # forzar flujo SQL para mantener contexto de la conversación.
+            # Esto es independiente del intent detector y no se rompe si se agregan nuevos flujos.
+            time_followup_intent = self._detect_time_followup(question, user_id)
+            if time_followup_intent:
+                route_type = "sql"
+                route_data = time_followup_intent
+                logger.info(f"[FOLLOWUP-TIME] '{question}' → SQL intent={time_followup_intent}")
+            else:
+                # Clasificar consulta normalmente
+                query_type = self.intent_detector.detect_query_type(question)
+                route_type = query_type.get("type")
+                route_data = query_type.get("data")
+                logger.info(f"Query type: {route_type}, data: {route_data}")
 
             if route_type == "general":
                 return await self._handle_general_flow(
@@ -373,7 +418,11 @@ class OptimizedAIEngine:
             params = sql_result.get("params", [])
 
             logger.info(f"[DEBUG-AI] store_id={store_id}")
-            logger.info(f"[DEBUG-AI] SQL generado: {sql}")
+            logger.info(f"[DEBUG-AI] SQL generado (original): {sql}")
+
+            # 7a. Corregir rangos de semana si el LLM no usó los macros correctos
+            sql = self._fix_week_ranges(sql, question)
+            logger.info(f"[DEBUG-AI] SQL (post-fix): {sql}")
             logger.info(f"[DEBUG-AI] params: {params}")
 
             if not sql:
@@ -388,6 +437,9 @@ class OptimizedAIEngine:
                     usage=usage,
                 )
             logger.info(f"[DEBUG-AI] Resultado: {data}")
+
+            # 7b. Extraer rango de fechas consultado
+            date_range_info = await self._extract_date_range(sql, params, store_id)
 
             t3 = datetime.now()
             logger.info(f"[TIMING] SQL exec: {(t3 - t2).total_seconds():.2f}s")
@@ -437,9 +489,10 @@ class OptimizedAIEngine:
                 "analysis": analysis,
                 "chart": self._suggest_chart(detected_intent, data),
                 "data": data,
-                "related_questions": self._suggest_followups(detected_intent),
+                "related_questions": [],
                 "audio_base64": audio_base64,
                 "tts_notice": tts_notice,
+                "date_range": date_range_info,
                 "ai_history": {
                     "tokens_used": usage.get("total_tokens", 0),
                     "cost_usd": cost,
@@ -482,6 +535,16 @@ class OptimizedAIEngine:
     ) -> Tuple[Dict[str, Any], Dict[str, int]]:
         prompt = self._load_unified_prompt()
 
+        # Inyectar fecha actual para contexto de semanas/meses
+        from zoneinfo import ZoneInfo
+        now_mx = datetime.now(ZoneInfo("America/Mexico_City"))
+        day_names = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        current_day_name = day_names[now_mx.weekday()]
+        # Calcular lunes de esta semana y lunes pasado
+        monday_this_week = now_mx.date() - timedelta(days=now_mx.weekday())
+        monday_last_week = monday_this_week - timedelta(days=7)
+        sunday_last_week = monday_this_week - timedelta(days=1)
+
         payload = {
             "CATALOG": catalog,
             "question": question,
@@ -489,6 +552,13 @@ class OptimizedAIEngine:
             "user_id": user_id,
             "hints": hints,
             "history": history,
+            "current_date": now_mx.strftime("%Y-%m-%d"),
+            "current_day": current_day_name,
+            "week_context": (
+                f"Hoy es {current_day_name} {now_mx.strftime('%Y-%m-%d')}. "
+                f"Esta semana: {monday_this_week} (lunes) a hoy. "
+                f"Semana pasada: {monday_last_week} (lunes) a {sunday_last_week} (domingo)."
+            ),
         }
 
         if store_examples:
@@ -536,6 +606,166 @@ class OptimizedAIEngine:
         except Exception as e:
             logger.error(f"Error ejecutando SQL: {e}")
             raise
+
+    # ── Regex compilado una sola vez para follow-ups de tiempo ──
+    _TIME_INDICATOR_RE = re.compile(
+        r"\b("
+        r"semana\s+pasada|esta\s+semana|semana\s+anterior|semana\s+actual"
+        r"|ayer|hoy|anteayer"
+        r"|este\s+mes|mes\s+pasado|mes\s+anterior|el\s+mes\s+actual"
+        r"|la\s+pasada|el\s+pasado|la\s+anterior"
+        r"|este\s+a[ñn]o|a[ñn]o\s+pasado"
+        r"|last\s+week|this\s+week|yesterday|today|this\s+month|last\s+month"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    # Frases que indican que es una pregunta nueva, no un follow-up
+    _NEW_TOPIC_INDICATORS_RE = re.compile(
+        r"\b("
+        r"registra|crea|agrega|nuevo|nueva|haz|hacer|aplica|descuento"
+        r"|cambia\s+el\s+precio|sube\s+el\s+precio|baja\s+el\s+precio"
+        r"|retiro|gasto|fondo|corte|cierre"
+        r"|v[eé]ndele|cobra|c[oó]brale"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    def _detect_time_followup(self, question: str, user_id: str) -> Optional[str]:
+        """Detecta si la pregunta es un follow-up temporal de una consulta SQL anterior.
+
+        Retorna el intent SQL del historial si es follow-up, None si no lo es.
+        Esto garantiza que preguntas como "y la semana pasada?", "y ayer?",
+        "qué tal este mes?" sigan el contexto de la conversación SQL anterior
+        sin importar cómo las clasifique el intent detector.
+        """
+        q = question.lower().strip()
+
+        # 1. ¿Contiene un indicador temporal?
+        if not self._TIME_INDICATOR_RE.search(q):
+            return None
+
+        # 2. ¿Es claramente una pregunta nueva (no follow-up)?
+        #    Ej: "registra un gasto de hoy" → NO es follow-up, es una operación
+        if self._NEW_TOPIC_INDICATORS_RE.search(q):
+            return None
+
+        # 3. ¿Es una pregunta SQL completa por sí misma?
+        #    Ej: "cuánto vendí la semana pasada" → el detector normal la maneja bien
+        own_intent = self.intent_detector.detect_intent(q)
+        if own_intent:
+            return None  # Dejar que el clasificador normal la maneje
+
+        # 4. Llegamos aquí = tiene tiempo pero no intent propio → es follow-up
+        #    Buscar el último intent SQL del historial
+        history = self.memory.get_history(user_id)
+        last_sql_intent = None
+        for h in reversed(history):
+            if h.get("role") == "user":
+                prev_intent = self.intent_detector.detect_intent(h.get("content", ""))
+                if prev_intent:
+                    last_sql_intent = prev_intent
+                    break
+
+        if last_sql_intent:
+            logger.info(f"[FOLLOWUP-TIME] Detectado: '{question}' hereda intent '{last_sql_intent}'")
+            return last_sql_intent
+
+        return None
+
+    def _fix_week_ranges(self, sql: str, question: str) -> str:
+        """Corrige rangos de semana en SQL generado por el LLM.
+
+        El LLM a veces usa DATE(ts) - 7 o ts - INTERVAL '7 days' para calcular
+        semanas, pero las semanas deben ser de calendario (lunes a domingo).
+        """
+        q_lower = question.lower()
+
+        # Detectar si la pregunta habla de semanas
+        is_last_week = any(w in q_lower for w in [
+            "semana pasada", "la pasada", "semana anterior",
+            "last week", "previous week",
+        ])
+        is_this_week = any(w in q_lower for w in [
+            "esta semana", "this week", "semana actual",
+        ])
+
+        if not is_last_week and not is_this_week:
+            return sql
+
+        # Si tiene dr AS, verificar que usa date_trunc('week')
+        dr_match = re.search(r"dr\s+AS\s*\(\s*SELECT\s+(.+?)\s+FROM\s+local_now\s*\)", sql, re.IGNORECASE)
+        if not dr_match:
+            return sql
+
+        dr_content = dr_match.group(1)
+        logger.info(f"[FIX-WEEK] dr content: {dr_content}")
+
+        if is_last_week:
+            # El macro correcto: date_trunc('week', ts) - INTERVAL '7 days' AS s, date_trunc('week', ts) AS e
+            correct_dr = "date_trunc('week', ts) - INTERVAL '7 days' AS s, date_trunc('week', ts) AS e"
+            if "date_trunc('week'" not in dr_content.lower().replace('"', "'"):
+                logger.warning(f"[FIX-WEEK] Corrigiendo last_week: {dr_content} -> {correct_dr}")
+                sql = sql[:dr_match.start(1)] + correct_dr + sql[dr_match.end(1):]
+            else:
+                # Tiene date_trunc pero verificar que el rango es correcto
+                # Debe tener: date_trunc('week', ts) - INTERVAL '7 days' como inicio
+                if "- interval '7 days'" not in dr_content.lower().replace('"', "'"):
+                    logger.warning(f"[FIX-WEEK] Corrigiendo last_week (sin -7d): {dr_content} -> {correct_dr}")
+                    sql = sql[:dr_match.start(1)] + correct_dr + sql[dr_match.end(1):]
+
+        elif is_this_week:
+            # El macro correcto: date_trunc('week', ts) AS s, DATE(ts) + 1 AS e
+            correct_dr = "date_trunc('week', ts) AS s, DATE(ts) + 1 AS e"
+            if "date_trunc('week'" not in dr_content.lower().replace('"', "'"):
+                logger.warning(f"[FIX-WEEK] Corrigiendo this_week: {dr_content} -> {correct_dr}")
+                sql = sql[:dr_match.start(1)] + correct_dr + sql[dr_match.end(1):]
+
+        return sql
+
+    async def _extract_date_range(self, sql: str, params: List[Any], store_id: Optional[str]) -> Optional[Dict[str, str]]:
+        """Extrae el rango de fechas real que se consultó ejecutando el CTE dr."""
+        try:
+            # Buscar si el SQL tiene CTE dr
+            if "dr" not in sql.lower():
+                return None
+
+            # Extraer el CTE dr con regex más permisivo
+            dr_match = re.search(
+                r"dr\s+AS\s*\(\s*SELECT\s+(.+?)\s+FROM\s+local_now\s*\)",
+                sql,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if not dr_match:
+                return None
+
+            dr_body = dr_match.group(1)
+            dr_sql = (
+                "WITH local_now AS (SELECT (now() AT TIME ZONE 'America/Mexico_City') AS ts), "
+                f"dr AS (SELECT {dr_body} FROM local_now) "
+                "SELECT s::date AS s, e::date AS e FROM dr"
+            )
+
+            with self.db.connect() as conn:
+                result = conn.execute(text(dr_sql))
+                row = result.mappings().first()
+                if row:
+                    s = row["s"]
+                    e = row["e"]
+                    # e es exclusivo (< e), así que el último día real es e - 1
+                    from datetime import date as date_type
+                    if isinstance(e, (datetime, date_type)):
+                        end_display = e - timedelta(days=1)
+                    else:
+                        end_display = e
+                    return {
+                        "from": str(s),
+                        "to": str(end_display),
+                        "label": f"{s} al {end_display}",
+                    }
+        except Exception as ex:
+            logger.warning(f"[DATE-RANGE] No se pudo extraer rango: {ex}")
+        return None
 
     def _to_bind_params(
         self, sql: str, params: List[Any], store_id: Optional[str]
@@ -991,7 +1221,7 @@ class OptimizedAIEngine:
                 "analysis": analysis,
                 "chart": None,
                 "data": data,
-                "related_questions": ["¿Qué productos tengo?", "¿Cuánto vendí hoy?"],
+                "related_questions": [],
                 "audio_base64": audio_base64,
                 "tts_notice": tts_notice,
                 "ai_history": {
@@ -1077,7 +1307,7 @@ class OptimizedAIEngine:
                 "analysis": analysis,
                 "chart": None,
                 "data": data,
-                "related_questions": ["¿Cuál es el más vendido?", "¿Cuánto vendí hoy?"],
+                "related_questions": [],
                 "audio_base64": audio_base64,
                 "tts_notice": tts_notice,
                 "ai_history": {
@@ -1839,6 +2069,53 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             return msg
         return "Operación registrada correctamente."
 
+    def _parse_price_value_answer(self, text: str) -> tuple:
+        """Parsea la respuesta del usuario para el valor de precio.
+
+        Retorna (value, action_override, is_percentage).
+        - "10%" → (10, None, True)
+        - "diez por ciento" → (10, None, True)
+        - "súmale 5 pesos" → (5, "increase", False)
+        - "restale 10" → (10, "decrease", False)
+        - "precio exacto 25" → (25, "set", False)
+        - "ponle 30" → (30, "set", False)
+        - "25" → (25, None, False)  — número simple, se interpreta según action existente
+        """
+        t = text.lower().strip()
+
+        # Mapeo de texto a números
+        word_nums = {
+            "uno": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5,
+            "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10,
+            "once": 11, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
+            "veinte": 20, "veinticinco": 25, "treinta": 30, "cuarenta": 40,
+            "cincuenta": 50, "cien": 100, "doscientos": 200, "quinientos": 500,
+        }
+
+        # Detectar porcentaje
+        is_pct = bool(re.search(r"%|por\s*ciento|porciento", t))
+
+        # Detectar acción implícita
+        action = None
+        if re.search(r"\b(suma|sumale|añade|añadele|sube|subele|aumenta|aumentale|incrementa)\b", t):
+            action = "increase"
+        elif re.search(r"\b(resta|restale|baja|bajale|reduce|reducele|quita|quitale|disminuye)\b", t):
+            action = "decrease"
+        elif re.search(r"\b(precio\s+exacto|ponle|ponlo|fija|fijale|establece|exacto|exactamente)\b", t):
+            action = "set"
+
+        # Extraer número
+        num_match = re.search(r"\$?\s*(\d+(?:\.\d+)?)", t)
+        if num_match:
+            return float(num_match.group(1)), action, is_pct
+
+        # Intentar con palabras
+        for word, num in word_nums.items():
+            if word in t:
+                return float(num), action, is_pct
+
+        return None, None, False
+
     async def _resume_pending_ops(
         self,
         pending_op: Dict[str, Any],
@@ -1892,7 +2169,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 latency = (datetime.now() - start_time).total_seconds()
                 return {
                     "analysis": analysis, "chart": None, "data": [result],
-                    "related_questions": ["¿Cuánto tengo en caja?", "¿Cuánto vendí hoy?"],
+                    "related_questions": [],
                     "audio_base64": audio_base64, "tts_notice": tts_notice,
                     "ops_mode": True, "ops_type": op_type, "ops_status": "completed",
                     "ai_history": {"tokens_used": 0, "cost_usd": 0,
@@ -1904,6 +2181,27 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             if len(missing) == 1:
                 field = missing[0]
                 value = answer.strip()
+
+                # Para value en price_change, parsear inteligentemente
+                if field == "value" and op_type in ("price_change", "discount"):
+                    value, action_override, is_pct = self._parse_price_value_answer(value)
+                    if value is not None:
+                        params["value"] = value
+                        params["is_percentage"] = is_pct
+                        if action_override:
+                            params["action"] = action_override
+                        # Saltar el setattr genérico de abajo
+                        field = None
+                    else:
+                        # No se pudo parsear, usar LLM
+                        extract = await self._extract_ops_params(answer, op_type, store_id)
+                        if extract.get("value"):
+                            params["value"] = extract["value"]
+                            if extract.get("is_percentage") is not None:
+                                params["is_percentage"] = extract["is_percentage"]
+                            if extract.get("action"):
+                                params["action"] = extract["action"]
+                            field = None
 
                 # Para category en expense, hacer fuzzy match con categorías existentes
                 if field == "category" and op_type == "expense":
@@ -1929,7 +2227,8 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                         extract = await self._extract_ops_params(answer, op_type, store_id)
                         value = extract.get("amount")
 
-                params[field] = value
+                if field is not None:
+                    params[field] = value
             else:
                 # Múltiples campos faltantes: usar LLM para extraer de la respuesta
                 new_params = await self._extract_ops_params(answer, op_type, store_id)
@@ -1939,6 +2238,10 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
 
             # Verificar si aún faltan campos
             still_missing = [f for f in config["required"] if not params.get(f)]
+            # Target condicional para price_change/discount
+            if op_type in ("price_change", "discount"):
+                if params.get("scope") in ("product", "category", "brand") and not params.get("target"):
+                    still_missing.append("target")
             if still_missing:
                 # Guardar de nuevo como pendiente
                 self.memory.set_pending_op(user_id, store_id, {
@@ -2027,7 +2330,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             latency = (datetime.now() - start_time).total_seconds()
             return {
                 "analysis": analysis, "chart": None, "data": [result],
-                "related_questions": ["¿Cuánto tengo en caja?", "¿Cuánto vendí hoy?"],
+                "related_questions": [],
                 "audio_base64": audio_base64, "tts_notice": tts_notice,
                 "ops_mode": True, "ops_type": op_type, "ops_status": "completed",
                 "ai_history": {"tokens_used": 0, "cost_usd": 0,
@@ -2087,6 +2390,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
 
                 # Para campos faltantes, mostrar opciones cuando aplique
                 questions_list = []
+                pending_products_data = []
                 for field in missing:
                     q = config["questions"].get(field, f"¿Cuál es el {field}?")
                     if field == "category" and operation_type == "expense":
@@ -2098,13 +2402,11 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                         if scope == "product":
                             products = self._find_products_by_scope(store_id, "all", None)
                             if products:
-                                product_list = "\n".join(
-                                    f"  • {p['name']} — ${p['base_price']:,.2f}"
-                                    for p in products[:20]
-                                )
-                                q = f"¿A qué producto le quieres cambiar el precio? Estos son tus productos:\n{product_list}"
-                                if len(products) > 20:
-                                    q += f"\n  ... y {len(products) - 20} más."
+                                pending_products_data = [
+                                    {"name": p["name"], "base_price": p["base_price"]}
+                                    for p in products[:50]
+                                ]
+                                q = "¿A qué producto le quieres cambiar el precio?"
                     questions_list.append(q)
 
                 analysis = " ".join(questions_list)
@@ -2115,11 +2417,13 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 # Guardar en historial para contexto
                 self.memory.update_history(user_id, question, analysis)
 
+                ops_data = pending_products_data
+
                 latency = (datetime.now() - start_time).total_seconds()
                 return {
                     "analysis": analysis,
                     "chart": None,
-                    "data": [],
+                    "data": ops_data,
                     "related_questions": [],
                     "audio_base64": audio_base64,
                     "tts_notice": tts_notice,
@@ -2171,7 +2475,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 latency = (datetime.now() - start_time).total_seconds()
                 return {
                     "analysis": analysis, "chart": None, "data": [],
-                    "related_questions": ["¿Cuánto tengo en caja?"],
+                    "related_questions": [],
                     "audio_base64": audio_base64, "tts_notice": tts_notice,
                     "ops_mode": True, "ops_type": operation_type, "ops_status": "rejected",
                     "ai_history": {"tokens_used": 0, "cost_usd": 0,
@@ -2196,7 +2500,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
                 "analysis": analysis,
                 "chart": None,
                 "data": [result],
-                "related_questions": ["¿Cuánto tengo en caja?", "¿Cuánto vendí hoy?"],
+                "related_questions": [],
                 "audio_base64": audio_base64,
                 "tts_notice": tts_notice,
                 "ops_mode": True,
@@ -3215,7 +3519,7 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
             "analysis": analysis,
             "chart": None,
             "data": [],
-            "related_questions": ["¿Cuánto vendí hoy?", "¿Cuáles son mis productos?"],
+            "related_questions": [],
             "audio_base64": None,
             "tts_notice": None,
             "ai_history": {
@@ -3248,4 +3552,5 @@ Si un valor no se menciona, ponlo como null. Si el monto se menciona como texto 
         self.memory.clear_pos(user_id, store_id)
         self.memory.clear_history(user_id)
         self.memory.clear_sale_session(user_id, store_id)
+        self.memory.clear_pending_op(user_id, store_id)
         return {"status": "ok", "message": "Contexto limpiado"}
