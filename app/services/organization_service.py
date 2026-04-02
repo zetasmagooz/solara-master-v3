@@ -39,11 +39,15 @@ class OrganizationService:
         await self.db.refresh(org)
         return org
 
-    async def list_stores(self, org_id: uuid.UUID) -> list[Store]:
+    async def list_stores(self, org_id: uuid.UUID, include_inactive: bool = False) -> list[Store]:
+        filters = [
+            Store.organization_id == org_id,
+            Store.is_warehouse.is_(False),
+        ]
+        if not include_inactive:
+            filters.append(Store.is_active.is_(True))
         result = await self.db.execute(
-            select(Store)
-            .where(Store.organization_id == org_id)
-            .order_by(Store.created_at)
+            select(Store).where(*filters).order_by(Store.created_at)
         )
         return list(result.scalars().all())
 

@@ -31,3 +31,4 @@ class AskResponse(BaseModel):
     ops_mode: Optional[bool] = None
     ops_status: Optional[str] = None
     ops_type: Optional[str] = None
+    date_range: Optional[Dict[str, str]] = Field(None, description="Rango de fechas consultado (from, to, label)")

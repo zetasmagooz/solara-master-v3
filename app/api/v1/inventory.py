@@ -51,6 +51,7 @@ async def create_inventory_entry(
     data: InventoryEntryCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    locale: str = Query("es", description="Idioma: es | en"),
 ):
     """Registra un movimiento de inventario (ingreso/egreso/reemplazo).
 
@@ -71,6 +72,7 @@ async def create_inventory_entry(
             store_id=current_user.default_store_id,
             user_id=current_user.id,
             data=data,
+            locale=locale,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

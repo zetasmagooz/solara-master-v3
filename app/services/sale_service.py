@@ -524,7 +524,7 @@ class SaleService:
         await self.db.refresh(sale)
         return sale
 
-    async def get_ia_dashboard_summary(self, store_id: UUID, user_name: str = "") -> dict:
+    async def get_ia_dashboard_summary(self, store_id: UUID, user_name: str = "", locale: str = "es") -> dict:
         """Dashboard summary for the IA screen: today's sales, profit, vs yesterday, top products, and insight."""
         local_date = func.date(func.timezone("America/Mexico_City", Sale.created_at))
         mx_now = datetime.now(ZoneInfo("America/Mexico_City"))
@@ -654,7 +654,7 @@ class SaleService:
 
         # ── Insight (template-based, sin LLM) ──
         insight = self._build_insight(
-            store_id, sales_today, profit_margin, vs_yesterday_pct, top_rows, user_name
+            store_id, sales_today, profit_margin, vs_yesterday_pct, top_rows, user_name, locale
         )
 
         return {
@@ -678,30 +678,45 @@ class SaleService:
         vs_yesterday_pct: float,
         top_rows: list,
         user_name: str,
+        locale: str = "es",
     ) -> str:
+        is_en = locale == "en"
+
         if sales_today == 0:
-            return "Aún no hay ventas registradas hoy. ¡Es un buen momento para preparar ofertas!"
+            return (
+                "No sales recorded yet today. It's a great time to prepare offers!"
+                if is_en
+                else "Aún no hay ventas registradas hoy. ¡Es un buen momento para preparar ofertas!"
+            )
 
         # Motivational message based on comparison
         if vs_yesterday_pct > 20:
-            motiv = "¡Día excelente"
+            motiv = "Excellent day" if is_en else "¡Día excelente"
             emoji = "🚀"
         elif vs_yesterday_pct >= 0:
-            motiv = "¡Vas bien"
+            motiv = "Going great" if is_en else "¡Vas bien"
             emoji = "💪"
         else:
-            motiv = "¡Ánimo"
+            motiv = "Keep pushing" if is_en else "¡Ánimo"
             emoji = "🔥"
 
         name_part = f", {user_name}" if user_name else ""
-        motiv_full = f"{motiv}{name_part}! {emoji}"
+        if is_en:
+            motiv_full = f"{motiv}{name_part}! {emoji}"
+        else:
+            motiv_full = f"{motiv}{name_part}! {emoji}"
 
         # Top product mention
-        top_name = top_rows[0].name if top_rows else "tus productos"
+        fallback = "your products" if is_en else "tus productos"
+        top_name = top_rows[0].name if top_rows else fallback
         top_qty = int(top_rows[0].qty) if top_rows else 0
 
-        parts = [f"💡 Tu producto estrella hoy es {top_name} con {top_qty} vendidos"]
-        parts.append(f"Tu margen es de {profit_margin:.0f}%")
-        parts.append(motiv_full)
+        if is_en:
+            parts = [f"💡 Your top product today is {top_name} with {top_qty} sold"]
+            parts.append(f"Your margin is {profit_margin:.0f}%")
+        else:
+            parts = [f"💡 Tu producto estrella hoy es {top_name} con {top_qty} vendidos"]
+            parts.append(f"Tu margen es de {profit_margin:.0f}%")
 
+        parts.append(motiv_full)
         return " • ".join(parts)
