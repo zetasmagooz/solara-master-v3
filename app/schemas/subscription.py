@@ -33,3 +33,21 @@ class SubscriptionResponse(BaseModel):
 
 class ActivatePlanRequest(BaseModel):
     plan_slug: str
+
+
+class CreatePlanRequest(BaseModel):
+    slug: str
+    name: str
+    description: str | None = None
+    price_monthly: float
+    features: dict | None = None
+    sort_order: int = 0
+
+
+class UpdatePlanRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    price_monthly: float | None = None
+    features: dict | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None

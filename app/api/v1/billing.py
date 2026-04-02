@@ -1,9 +1,12 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, require_owner
+from app.models.store import Store
+from app.models.subscription import Plan
 from app.models.user import User
 from app.schemas.billing import (
     BillingOverviewResponse,
@@ -11,9 +14,12 @@ from app.schemas.billing import (
     CancelSubscriptionRequest,
     ChangePlanRequest,
     CreateSetupIntentRequest,
+    DowngradeStoresRequest,
     PaymentMethodResponse,
     SetPaymentMethodDefaultRequest,
     SetupIntentResponse,
+    ValidatePlanChangeRequest,
+    ValidatePlanChangeResponse,
 )
 from app.services.stripe_billing import StripeBillingService
 
@@ -192,6 +198,124 @@ async def cancel_subscription(
     _require_org(current_user)
     service = StripeBillingService(db)
     try:
-        return await service.cancel_subscription(current_user.organization_id)
+        sub = await service.cancel_subscription(current_user.organization_id)
+        await db.commit()
+        await db.refresh(sub)
+        return sub
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# ─── Plan Change Validation ─────────────────────────────
+
+
+@router.post("/validate-plan-change", response_model=ValidatePlanChangeResponse)
+async def validate_plan_change(
+    data: ValidatePlanChangeRequest,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Valida si el cambio de plan requiere selección de tiendas.
+
+    Retorna la lista de tiendas activas y si el usuario debe elegir cuáles conservar.
+    """
+    _require_org(current_user)
+
+    # Obtener plan destino
+    result = await db.execute(select(Plan).where(Plan.slug == data.plan_slug, Plan.is_active.is_(True)))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan no encontrado")
+
+    features = plan.features or {}
+    max_stores = features.get("max_stores", 1)
+
+    # Contar tiendas activas (excluyendo almacenes)
+    stores_result = await db.execute(
+        select(Store).where(
+            Store.owner_id == current_user.id,
+            Store.is_active.is_(True),
+            Store.is_warehouse.is_(False),
+        ).order_by(Store.created_at)
+    )
+    active_stores = list(stores_result.scalars().all())
+    active_count = len(active_stores)
+
+    requires_selection = max_stores != -1 and active_count > max_stores
+
+    return ValidatePlanChangeResponse(
+        requires_store_selection=requires_selection,
+        max_stores=max_stores,
+        active_stores_count=active_count,
+        stores=[{"id": s.id, "name": s.name, "is_active": s.is_active} for s in active_stores],
+    )
+
+
+@router.post("/downgrade-stores")
+async def downgrade_stores(
+    data: DowngradeStoresRequest,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Desactiva tiendas sobrantes antes de un downgrade.
+
+    El usuario envía las tiendas que quiere conservar (keep_store_ids).
+    Las demás se desactivan. La primera de keep_store_ids se establece como tienda actual.
+    """
+    _require_org(current_user)
+
+    # Validar plan
+    result = await db.execute(select(Plan).where(Plan.slug == data.plan_slug, Plan.is_active.is_(True)))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan no encontrado")
+
+    features = plan.features or {}
+    max_stores = features.get("max_stores", 1)
+
+    # Validar que no se exceda el máximo
+    if max_stores != -1 and len(data.keep_store_ids) > max_stores:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Solo puedes conservar {max_stores} tienda(s) en este plan",
+        )
+
+    if len(data.keep_store_ids) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes conservar al menos una tienda",
+        )
+
+    # Obtener tiendas activas del owner
+    stores_result = await db.execute(
+        select(Store).where(
+            Store.owner_id == current_user.id,
+            Store.is_active.is_(True),
+            Store.is_warehouse.is_(False),
+        )
+    )
+    active_stores = list(stores_result.scalars().all())
+    active_ids = {s.id for s in active_stores}
+
+    # Verificar que todas las keep_store_ids son tiendas activas del owner
+    for sid in data.keep_store_ids:
+        if sid not in active_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La tienda {sid} no es una tienda activa tuya",
+            )
+
+    # Desactivar tiendas que NO están en keep_store_ids
+    deactivate_ids = active_ids - set(data.keep_store_ids)
+    if deactivate_ids:
+        await db.execute(
+            update(Store)
+            .where(Store.id.in_(deactivate_ids))
+            .values(is_active=False)
+        )
+
+    await db.commit()
+    return {
+        "deactivated_count": len(deactivate_ids),
+        "active_store_ids": [str(sid) for sid in data.keep_store_ids],
+    }

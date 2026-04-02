@@ -376,6 +376,7 @@ class StripeBillingService:
         stripe.Subscription.modify(sub.stripe_subscription_id, cancel_at_period_end=True)
         sub.cancel_at_period_end = True
         await self.db.flush()
+        await self.db.refresh(sub)
         return sub
 
     async def get_billing_overview(self, organization_id: uuid.UUID) -> dict:

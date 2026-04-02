@@ -235,13 +235,15 @@ class AuthService:
 
         target_store_id = store_id if isinstance(store_id, UUIDType) else UUIDType(str(store_id))
 
-        # Verificar que la tienda pertenece al owner
+        # Verificar que la tienda pertenece al owner y está activa
         store_result = await self.db.execute(
             select(Store).where(Store.id == target_store_id, Store.owner_id == user.id)
         )
         store = store_result.scalar_one_or_none()
         if not store:
             raise ValueError("Tienda no encontrada o no te pertenece")
+        if not store.is_active:
+            raise ValueError("Esta tienda está desactivada. Adquiere un plan mayor para reactivarla.")
 
         # Actualizar default_store_id
         user.default_store_id = target_store_id

@@ -43,6 +43,17 @@ class AiStoreLearning(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
+class AiDailyUsage(Base):
+    """Conteo diario de consultas IA por organización."""
+    __tablename__ = "ai_daily_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    usage_date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    query_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class AiSuperpower(Base):
     __tablename__ = "ai_superpower"
 

@@ -80,3 +80,29 @@ class BillingOverviewResponse(BaseModel):
     subscription: BillingSubscriptionResponse | None = None
     payment_methods: list[PaymentMethodResponse] = []
     recent_invoices: list[InvoiceResponse] = []
+
+
+# --- Plan change validation ---
+
+class ValidatePlanChangeRequest(BaseModel):
+    plan_slug: str
+
+
+class StoreInfo(BaseModel):
+    id: UUID
+    name: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class ValidatePlanChangeResponse(BaseModel):
+    requires_store_selection: bool
+    max_stores: int
+    active_stores_count: int
+    stores: list[StoreInfo]
+
+
+class DowngradeStoresRequest(BaseModel):
+    plan_slug: str
+    keep_store_ids: list[UUID]

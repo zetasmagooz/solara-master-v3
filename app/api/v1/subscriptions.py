@@ -1,11 +1,18 @@
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, require_owner
 from app.models.user import User
-from app.schemas.subscription import ActivatePlanRequest, PlanResponse, SubscriptionResponse
+from app.schemas.subscription import (
+    ActivatePlanRequest,
+    CreatePlanRequest,
+    PlanResponse,
+    SubscriptionResponse,
+    UpdatePlanRequest,
+)
 from app.services.subscription_service import SubscriptionService
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
@@ -75,3 +82,69 @@ async def activate_plan(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     return sub
+
+
+# ─── CRUD de Planes (solo owners) ───────────────────────
+
+
+@router.post("/plans", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    data: CreatePlanRequest,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Crea un nuevo plan y lo sincroniza con Stripe."""
+    service = SubscriptionService(db)
+    try:
+        plan = await service.create_plan(
+            slug=data.slug,
+            name=data.name,
+            price_monthly=data.price_monthly,
+            description=data.description,
+            features=data.features,
+            sort_order=data.sort_order,
+        )
+        await db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return plan
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanResponse)
+async def update_plan(
+    plan_id: UUID,
+    data: UpdatePlanRequest,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Actualiza un plan existente. Si cambia el precio, crea nuevo Price en Stripe."""
+    service = SubscriptionService(db)
+    try:
+        plan = await service.update_plan(
+            plan_id=plan_id,
+            name=data.name,
+            description=data.description,
+            price_monthly=data.price_monthly,
+            features=data.features,
+            is_active=data.is_active,
+            sort_order=data.sort_order,
+        )
+        await db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return plan
+
+
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan(
+    plan_id: UUID,
+    current_user: Annotated[User, Depends(require_owner)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Elimina (desactiva) un plan. Falla si hay suscripciones activas."""
+    service = SubscriptionService(db)
+    try:
+        await service.delete_plan(plan_id)
+        await db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -10,6 +10,7 @@ from app.dependencies import get_current_user, get_db, require_owner
 from app.models.auth import Session
 from app.models.organization import Organization
 from app.models.store import Store, StoreConfig
+from app.models.stripe import StripeSubscription
 from app.models.subscription import OrganizationSubscription, Plan
 from app.models.user import User
 
@@ -148,7 +149,7 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
     features = plan.features or {}
     max_stores = features.get("max_stores", 1)
     price_extra = features.get("price_per_additional_store", 0)
-    free_stores = 1
+    free_stores = features.get("free_stores", 1)
     additional = max(0, active_count - free_stores)
 
     can_add = max_stores == -1 or active_count < max_stores
@@ -187,7 +188,21 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
         "next_month_total": float(plan.price_monthly) + (additional * price_extra),
         "status": sub.status,
         "expires_at": sub.expires_at.isoformat() if sub.expires_at else None,
+        "cancel_at_period_end": False,
     }
+
+    # Verificar si hay cancelación programada en Stripe
+    stripe_sub_result = await db.execute(
+        select(StripeSubscription).where(
+            StripeSubscription.organization_id == org_id,
+            StripeSubscription.status.in_(["active", "trialing", "past_due"]),
+        )
+    )
+    stripe_sub = stripe_sub_result.scalar_one_or_none()
+    if stripe_sub and stripe_sub.cancel_at_period_end:
+        result["cancel_at_period_end"] = True
+
+    return result
 
 
 @router.get("/subscription-info")

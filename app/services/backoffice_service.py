@@ -327,7 +327,10 @@ class BackofficeService:
         return plans
 
     async def update_plan(self, plan_id: uuid.UUID, data: dict, admin_user_id: uuid.UUID) -> dict | None:
-        """Actualizar un plan y registrar el historial de precios."""
+        """Actualizar un plan, registrar historial de precios y sincronizar con Stripe."""
+        import stripe
+        from app.config import settings
+
         db = self.db
 
         plan = (await db.execute(select(Plan).where(Plan.id == plan_id))).scalar_one_or_none()
@@ -356,7 +359,58 @@ class BackofficeService:
             )
             db.add(history)
 
-        return {"id": plan.id, "name": plan.name, "price_monthly": new_price}
+        # ── Sincronizar con Stripe ──
+        if settings.STRIPE_SECRET_KEY:
+            stripe.api_key = settings.STRIPE_SECRET_KEY
+
+            # Si cambia el precio → archivar Price viejo, crear nuevo
+            if old_price != new_price:
+                product_id = None
+
+                # Obtener product_id del Price actual
+                if plan.stripe_price_id:
+                    try:
+                        old_price_obj = stripe.Price.retrieve(plan.stripe_price_id)
+                        product_id = old_price_obj.product
+                        # Archivar Price anterior
+                        stripe.Price.modify(plan.stripe_price_id, active=False)
+                    except Exception:
+                        pass
+
+                # Si no hay producto, crear uno
+                if not product_id:
+                    product = stripe.Product.create(
+                        name=plan.name,
+                        description=plan.description or "",
+                        metadata={"slug": plan.slug},
+                    )
+                    product_id = product.id
+
+                # Crear nuevo Price
+                new_stripe_price = stripe.Price.create(
+                    product=product_id,
+                    unit_amount=int(new_price * 100),
+                    currency="mxn",
+                    recurring={"interval": "month"},
+                )
+                plan.stripe_price_id = new_stripe_price.id
+
+            # Si cambia nombre o descripción → actualizar Product en Stripe
+            if data.get("name") is not None or data.get("description") is not None:
+                if plan.stripe_price_id:
+                    try:
+                        price_obj = stripe.Price.retrieve(plan.stripe_price_id)
+                        update_fields = {}
+                        if data.get("name") is not None:
+                            update_fields["name"] = data["name"]
+                        if data.get("description") is not None:
+                            update_fields["description"] = data["description"]
+                        if update_fields:
+                            stripe.Product.modify(price_obj.product, **update_fields)
+                    except Exception:
+                        pass
+
+        return {"id": plan.id, "name": plan.name, "price_monthly": new_price, "stripe_price_id": plan.stripe_price_id}
 
     # ── Bloqueos ─────────────────────────────────────────
 

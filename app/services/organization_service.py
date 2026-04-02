@@ -42,7 +42,11 @@ class OrganizationService:
     async def list_stores(self, org_id: uuid.UUID) -> list[Store]:
         result = await self.db.execute(
             select(Store)
-            .where(Store.organization_id == org_id)
+            .where(
+                Store.organization_id == org_id,
+                Store.is_active.is_(True),
+                Store.is_warehouse.is_(False),
+            )
             .order_by(Store.created_at)
         )
         return list(result.scalars().all())

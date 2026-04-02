@@ -4,9 +4,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.dependencies import get_current_user, get_db, require_owner
 from app.models.organization import Organization
+from app.models.subscription import OrganizationSubscription
 from app.models.store import Store
 from app.models.user import User
 from app.schemas.organization import (
@@ -243,6 +245,27 @@ async def toggle_module(
     org = result.scalar_one_or_none()
     if not org:
         raise HTTPException(status_code=404, detail="No tienes una organización")
+
+    # Validar que el plan permita almacén (requiere max_stores >= 2)
+    if module_name == "warehouse" and not getattr(org, "warehouse_enabled", False):
+        # Solo validar al ACTIVAR, no al desactivar
+        sub_result = await db.execute(
+            select(OrganizationSubscription)
+            .where(
+                OrganizationSubscription.organization_id == org.id,
+                OrganizationSubscription.status.in_(["trial", "active"]),
+            )
+            .options(selectinload(OrganizationSubscription.plan))
+        )
+        sub = sub_result.scalar_one_or_none()
+        if sub and sub.plan:
+            features = sub.plan.features or {}
+            max_stores = features.get("max_stores", 1)
+            if max_stores != -1 and max_stores < 2:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tu plan solo permite 1 tienda. El almacén requiere un plan con 2 o más tiendas.",
+                )
 
     field = f"{module_name}_enabled"
     current = getattr(org, field, False)
