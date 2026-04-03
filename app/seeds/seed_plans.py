@@ -26,7 +26,7 @@ PLANS = [
             "free_stores": 1,
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "ajustar_inventario",
-                "reportes", "reporte_ventas", "clientes", "reporte_gastos", "ajustes",
+                "reporte_ventas", "clientes", "reporte_gastos", "ajustes",
             ],
             "reports": ["ventas", "clientes", "gastos"],
             "support": "email",
@@ -49,7 +49,7 @@ PLANS = [
             "free_stores": 1,
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "marcas",
-                "proveedores", "ajustar_inventario", "reportes", "reporte_ventas",
+                "proveedores", "ajustar_inventario", "reporte_ventas",
                 "clientes", "reporte_gastos", "reporte_productos", "ajustes",
             ],
             "reports": ["ventas", "clientes", "gastos", "productos_vendidos"],
@@ -74,7 +74,7 @@ PLANS = [
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "marcas",
                 "proveedores", "ajustar_inventario", "combos", "insumos",
-                "reportes", "reporte_ventas", "clientes", "reporte_gastos",
+                "reporte_ventas", "clientes", "reporte_gastos",
                 "reporte_productos", "ajustes", "almacen",
             ],
             "reports": ["ventas", "clientes", "gastos", "productos_vendidos"],
@@ -99,10 +99,9 @@ PLANS = [
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "marcas",
                 "proveedores", "ajustar_inventario", "combos", "insumos",
-                "reportes", "reporte_ventas", "clientes", "reporte_gastos",
-                "reporte_productos", "ajustes", "almacen", "empresa",
+                "reporte_ventas", "clientes", "reporte_gastos",
+                "reporte_productos", "ajustes", "almacen",
                 "dashboard_empresa", "tiendas", "reporte_empresa",
-                "restaurante", "usuarios", "devoluciones", "plataformas",
             ],
             "reports": ["all"],
             "support": "dedicated",
