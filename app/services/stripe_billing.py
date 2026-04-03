@@ -261,27 +261,23 @@ class StripeBillingService:
 
         default_pm = pms[0].stripe_pm_id
 
-        # ── Si ya tiene suscripción activa en Stripe → cambio de plan con prorrateo ──
+        # ── Si ya tiene suscripción activa en Stripe → cambio de plan ──
         existing_sub = await self._get_active_stripe_subscription(organization_id)
         if existing_sub:
-            # Obtener la suscripción de Stripe para saber el item_id
+            # Obtener plan actual para comparar precios
+            current_plan_result = await self.db.execute(
+                select(Plan).where(Plan.stripe_price_id == existing_sub.stripe_price_id)
+            )
+            current_plan = current_plan_result.scalar_one_or_none()
+            current_price = float(current_plan.price_monthly) if current_plan else 0
+
+            is_downgrade = plan.price_monthly < current_price
+
             stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
             items = self._get_sub_field(stripe_sub_obj, "items")
             item_data = items.get("data", []) if items else []
 
-            if item_data:
-                # Cambiar el plan — always_invoice genera factura inmediata SOLO con la diferencia
-                # El siguiente cobro regular se hace en la fecha de renovación normal
-                sub = stripe.Subscription.modify(
-                    existing_sub.stripe_subscription_id,
-                    items=[{
-                        "id": self._get_sub_field(item_data[0], "id"),
-                        "price": plan.stripe_price_id,
-                    }],
-                    proration_behavior="always_invoice",
-                    payment_behavior="error_if_incomplete",
-                )
-            else:
+            if not item_data:
                 # Fallback: cancelar y crear nueva
                 stripe.Subscription.cancel(existing_sub.stripe_subscription_id)
                 existing_sub.status = "cancelled"
@@ -292,31 +288,110 @@ class StripeBillingService:
                     default_payment_method=default_pm,
                     payment_behavior="error_if_incomplete",
                 )
+                period_start, period_end = self._extract_period(sub)
+                existing_sub.stripe_price_id = plan.stripe_price_id
+                existing_sub.status = self._get_sub_field(sub, "status") or "active"
+                existing_sub.current_period_start = period_start
+                existing_sub.current_period_end = period_end
 
-            # Actualizar StripeSubscription existente
-            period_start, period_end = self._extract_period(sub)
+                if existing_sub.org_subscription_id:
+                    org_sub_result = await self.db.execute(
+                        select(OrganizationSubscription).where(OrganizationSubscription.id == existing_sub.org_subscription_id)
+                    )
+                    org_sub = org_sub_result.scalar_one_or_none()
+                    if org_sub:
+                        org_sub.plan_id = plan.id
+                        org_sub.status = "active"
+                        org_sub.started_at = period_start
+                        org_sub.expires_at = period_end
+                        org_sub.updated_at = datetime.now(timezone.utc)
 
-            existing_sub.stripe_price_id = plan.stripe_price_id
-            existing_sub.status = self._get_sub_field(sub, "status") or "active"
-            existing_sub.current_period_start = period_start
-            existing_sub.current_period_end = period_end
+                await self.db.flush()
+                await self.db.refresh(existing_sub)
+                return existing_sub
 
-            # Actualizar OrganizationSubscription con nuevo plan
-            if existing_sub.org_subscription_id:
-                org_sub_result = await self.db.execute(
-                    select(OrganizationSubscription).where(OrganizationSubscription.id == existing_sub.org_subscription_id)
+            if is_downgrade:
+                # ── DOWNGRADE: programar cambio al final del periodo ──
+                # No cobrar nada. El cambio se aplica al renovar.
+                sub = stripe.Subscription.modify(
+                    existing_sub.stripe_subscription_id,
+                    items=[{
+                        "id": self._get_sub_field(item_data[0], "id"),
+                        "price": plan.stripe_price_id,
+                    }],
+                    proration_behavior="none",
                 )
-                org_sub = org_sub_result.scalar_one_or_none()
-                if org_sub:
-                    org_sub.plan_id = plan.id
-                    org_sub.status = "active"
-                    org_sub.started_at = period_start
-                    org_sub.expires_at = period_end
-                    org_sub.updated_at = datetime.now(timezone.utc)
+                # Guardar metadata del downgrade pendiente
+                stripe.Subscription.modify(
+                    existing_sub.stripe_subscription_id,
+                    metadata={
+                        "pending_downgrade": "true",
+                        "downgrade_plan_id": str(plan.id),
+                        "downgrade_plan_slug": plan_slug,
+                    },
+                )
+                period_end = self._extract_period(sub)[1]
 
-            await self.db.flush()
-            await self.db.refresh(existing_sub)
-            return existing_sub
+                # NO cambiar el plan actual en la DB todavía
+                # Solo marcar que hay un downgrade pendiente
+                existing_sub.status = self._get_sub_field(sub, "status") or "active"
+
+                # Guardar info del downgrade en la org_subscription
+                if existing_sub.org_subscription_id:
+                    org_sub_result = await self.db.execute(
+                        select(OrganizationSubscription).where(OrganizationSubscription.id == existing_sub.org_subscription_id)
+                    )
+                    org_sub = org_sub_result.scalar_one_or_none()
+                    if org_sub:
+                        org_sub.updated_at = datetime.now(timezone.utc)
+
+                await self.db.flush()
+                await self.db.refresh(existing_sub)
+
+                # Retornar con info del downgrade
+                existing_sub.__dict__["_downgrade_info"] = {
+                    "is_downgrade": True,
+                    "new_plan_name": plan.name,
+                    "new_plan_slug": plan_slug,
+                    "new_price": float(plan.price_monthly),
+                    "effective_date": period_end.isoformat() if period_end else None,
+                }
+                return existing_sub
+            else:
+                # ── UPGRADE: cobrar diferencia inmediatamente ──
+                sub = stripe.Subscription.modify(
+                    existing_sub.stripe_subscription_id,
+                    items=[{
+                        "id": self._get_sub_field(item_data[0], "id"),
+                        "price": plan.stripe_price_id,
+                    }],
+                    proration_behavior="always_invoice",
+                    payment_behavior="error_if_incomplete",
+                    metadata={"pending_downgrade": ""},  # Limpiar downgrade pendiente
+                )
+                period_start, period_end = self._extract_period(sub)
+
+                existing_sub.stripe_price_id = plan.stripe_price_id
+                existing_sub.status = self._get_sub_field(sub, "status") or "active"
+                existing_sub.current_period_start = period_start
+                existing_sub.current_period_end = period_end
+
+                # Actualizar OrganizationSubscription con nuevo plan inmediatamente
+                if existing_sub.org_subscription_id:
+                    org_sub_result = await self.db.execute(
+                        select(OrganizationSubscription).where(OrganizationSubscription.id == existing_sub.org_subscription_id)
+                    )
+                    org_sub = org_sub_result.scalar_one_or_none()
+                    if org_sub:
+                        org_sub.plan_id = plan.id
+                        org_sub.status = "active"
+                        org_sub.started_at = period_start
+                        org_sub.expires_at = period_end
+                        org_sub.updated_at = datetime.now(timezone.utc)
+
+                await self.db.flush()
+                await self.db.refresh(existing_sub)
+                return existing_sub
 
         # ── Nueva suscripción (no tenía una activa en Stripe) ──
 

@@ -158,13 +158,16 @@ async def delete_payment_method(
 
 # ─── Subscription ───────────────────────────────────────
 
-@router.post("/subscribe", response_model=BillingSubscriptionResponse)
+@router.post("/subscribe")
 async def create_subscription(
     data: ChangePlanRequest,
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Crea o cambia la suscripción de Stripe.
+
+    - **Upgrade** (plan más caro): se cobra la diferencia inmediatamente.
+    - **Downgrade** (plan más barato): NO se cobra. El cambio aplica al final del periodo actual.
 
     **Ejemplo curl:**
     ```bash
@@ -177,7 +180,22 @@ async def create_subscription(
     _require_org(current_user)
     service = StripeBillingService(db)
     try:
-        return await service.create_subscription(current_user.organization_id, data.plan_slug)
+        sub = await service.create_subscription(current_user.organization_id, data.plan_slug)
+
+        # Verificar si hay info de downgrade pendiente
+        downgrade_info = getattr(sub, "__dict__", {}).get("_downgrade_info")
+        if downgrade_info:
+            return {
+                "status": "downgrade_scheduled",
+                "message": f"Tu plan cambiará a {downgrade_info['new_plan_name']} cuando finalice tu periodo actual.",
+                "downgrade": downgrade_info,
+                "subscription": BillingSubscriptionResponse.model_validate(sub),
+            }
+
+        return {
+            "status": "ok",
+            "subscription": BillingSubscriptionResponse.model_validate(sub),
+        }
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
