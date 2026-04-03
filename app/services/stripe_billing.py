@@ -543,7 +543,7 @@ class StripeBillingService:
         await self.db.flush()
 
     async def handle_subscription_updated(self, stripe_sub: dict) -> None:
-        """Procesa customer.subscription.updated — sincroniza estado y fechas."""
+        """Procesa customer.subscription.updated — sincroniza estado, fechas y downgrades."""
         result = await self.db.execute(
             select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
         )
@@ -558,14 +558,55 @@ class StripeBillingService:
         if stripe_sub.get("current_period_end"):
             sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
 
-        # Sincronizar con OrganizationSubscription
+        # Detectar cambio de precio (upgrade/downgrade aplicado por Stripe al renovar)
+        items = stripe_sub.get("items", {}).get("data", [])
+        current_stripe_price = items[0]["price"]["id"] if items else None
+        price_changed = current_stripe_price and current_stripe_price != sub.stripe_price_id
+
+        if price_changed:
+            logger.info(f"[WEBHOOK] Precio cambió: {sub.stripe_price_id} → {current_stripe_price}")
+            sub.stripe_price_id = current_stripe_price
+
+            # Buscar el plan correspondiente al nuevo precio
+            new_plan_result = await self.db.execute(
+                select(Plan).where(Plan.stripe_price_id == current_stripe_price)
+            )
+            new_plan = new_plan_result.scalar_one_or_none()
+
+            if new_plan and sub.org_subscription_id:
+                org_sub_result = await self.db.execute(
+                    select(OrganizationSubscription).where(OrganizationSubscription.id == sub.org_subscription_id)
+                )
+                org_sub = org_sub_result.scalar_one_or_none()
+                if org_sub:
+                    logger.info(f"[WEBHOOK] Downgrade aplicado: plan_id {org_sub.plan_id} → {new_plan.id} ({new_plan.name})")
+                    org_sub.plan_id = new_plan.id
+                    org_sub.status = "active"
+                    org_sub.started_at = sub.current_period_start or org_sub.started_at
+                    org_sub.expires_at = sub.current_period_end
+                    org_sub.updated_at = datetime.now(timezone.utc)
+
+                # Limpiar metadata de downgrade pendiente
+                metadata = stripe_sub.get("metadata", {})
+                if metadata.get("pending_downgrade"):
+                    try:
+                        stripe.Subscription.modify(
+                            stripe_sub["id"],
+                            metadata={"pending_downgrade": "", "downgrade_plan_id": "", "downgrade_plan_slug": ""},
+                        )
+                    except Exception as e:
+                        logger.warning(f"[WEBHOOK] No se pudo limpiar metadata de downgrade: {e}")
+
+                await self.db.flush()
+                return
+
+        # Sincronizar con OrganizationSubscription (sin cambio de plan)
         if sub.org_subscription_id:
             org_sub_result = await self.db.execute(
                 select(OrganizationSubscription).where(OrganizationSubscription.id == sub.org_subscription_id)
             )
             org_sub = org_sub_result.scalar_one_or_none()
             if org_sub:
-                # Mapear status de Stripe a nuestro status
                 status_map = {"active": "active", "past_due": "active", "canceled": "cancelled", "unpaid": "expired"}
                 org_sub.status = status_map.get(stripe_sub["status"], org_sub.status)
                 org_sub.started_at = sub.current_period_start or org_sub.started_at
