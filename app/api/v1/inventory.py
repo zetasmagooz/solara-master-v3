@@ -6,10 +6,18 @@ from app.models.user import User
 from app.schemas.inventory import (
     AdjustmentCreate,
     AdjustmentResponse,
+    IAApplyRequest,
+    IAApplyResponse,
+    IAPreviewRequest,
+    IAPreviewResponse,
+    IASearchRequest,
+    IASearchResponse,
+    IAUndoResponse,
     InventoryEntryCreate,
     InventoryEntryResponse,
 )
 from app.services.inventory_service import InventoryService
+from app.services.inventory_ia_service import InventoryIAService
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -132,3 +140,96 @@ async def list_adjustments(
         page=page,
         per_page=per_page,
     )
+
+
+# ── Flujo IA — Ajuste guiado de inventario ──────────────────
+
+
+@router.post("/ia/search", response_model=IASearchResponse)
+async def ia_search(
+    data: IASearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Busca productos, categorías, marcas o proveedores para el flujo de ajuste IA."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    service = InventoryIAService(db)
+    return await service.search(
+        store_id=current_user.default_store_id,
+        query=data.query,
+        scope=data.scope.value if data.scope else None,
+    )
+
+
+@router.post("/ia/preview", response_model=IAPreviewResponse)
+async def ia_preview(
+    data: IAPreviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Vista previa del ajuste sin ejecutar. Muestra productos afectados y warnings."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    import uuid as _uuid
+    service = InventoryIAService(db)
+    return await service.preview(
+        store_id=current_user.default_store_id,
+        target_scope=data.target_scope.value,
+        target_id=_uuid.UUID(data.target_id),
+        action=data.action.value,
+        quantity=data.quantity,
+    )
+
+
+@router.post("/ia/apply", response_model=IAApplyResponse, status_code=status.HTTP_201_CREATED)
+async def ia_apply(
+    data: IAApplyRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Ejecuta el ajuste de inventario. Guarda snapshot para deshacer."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    import uuid as _uuid
+    service = InventoryIAService(db)
+    try:
+        result = await service.apply(
+            store_id=current_user.default_store_id,
+            user_id=current_user.id,
+            target_scope=data.target_scope.value,
+            target_id=_uuid.UUID(data.target_id),
+            action=data.action.value,
+            quantity=data.quantity,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result
+
+
+@router.post("/ia/undo/{adjustment_id}", response_model=IAUndoResponse)
+async def ia_undo(
+    adjustment_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deshace un ajuste de inventario (máx 30 min después de crearlo)."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    import uuid as _uuid
+    service = InventoryIAService(db)
+    try:
+        result = await service.undo(
+            store_id=current_user.default_store_id,
+            user_id=current_user.id,
+            adjustment_id=_uuid.UUID(adjustment_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return result

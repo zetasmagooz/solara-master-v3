@@ -140,3 +140,78 @@ class InventoryLogEntry(BaseModel):
     created_by_name: str | None = None
     products: list[LogItemProduct] = []
     created_at: str
+
+
+# ── Flujo IA — Ajuste guiado de inventario ──
+
+class IASearchScope(str, Enum):
+    product = "product"
+    category = "category"
+    brand = "brand"
+    supplier = "supplier"
+
+
+class IAActionType(str, Enum):
+    add = "add"
+    subtract = "subtract"
+    replace = "replace"
+
+
+class IASearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=200)
+    scope: IASearchScope | None = None
+
+
+class IASearchResultItem(BaseModel):
+    id: str
+    name: str
+    scope: str  # product | category | brand | supplier
+    stock: float | None = None  # solo para producto individual
+    product_count: int | None = None  # para category/brand/supplier
+    extra: str | None = None  # info adicional (ej: categoría del producto)
+
+
+class IASearchResponse(BaseModel):
+    results: list[IASearchResultItem]
+
+
+class IAPreviewRequest(BaseModel):
+    target_scope: IASearchScope
+    target_id: str
+    action: IAActionType
+    quantity: float = Field(..., gt=0)
+
+
+class IAPreviewExample(BaseModel):
+    name: str
+    before: float
+    after: float
+
+
+class IAPreviewResponse(BaseModel):
+    target_name: str
+    target_scope: str
+    action: str
+    quantity: float
+    affected_count: int
+    warnings: list[str] = []
+    examples: list[IAPreviewExample] = []
+
+
+class IAApplyRequest(BaseModel):
+    target_scope: IASearchScope
+    target_id: str
+    action: IAActionType
+    quantity: float = Field(..., gt=0)
+
+
+class IAApplyResponse(BaseModel):
+    adjustment_id: str
+    applied_count: int
+    status: str = "completed"
+    created_at: str
+
+
+class IAUndoResponse(BaseModel):
+    undone_count: int
+    status: str = "reverted"
