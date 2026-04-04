@@ -4,10 +4,11 @@ Aislado del InventoryService existente para no interferir con el flujo actual.
 Reutiliza los modelos InventoryAdjustment/InventoryAdjustmentItem para auditoría.
 """
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -38,11 +39,23 @@ class InventoryIAService:
 
     # ── Search ──────────────────────────────────────────────
 
+    @staticmethod
+    def _fuzzy_filters(column, query: str):
+        """Genera filtros ILIKE por cada palabra del query.
+
+        'coca cola' → column ILIKE '%coca%' AND column ILIKE '%cola%'
+        Así 'Coca-Cola 600ml' matchea con 'coca cola', 'cocacola', 'cola 600', etc.
+        """
+        words = re.split(r"[\s\-_]+", query.strip().lower())
+        words = [w for w in words if w]
+        if not words:
+            return [func.lower(column).ilike("%%")]
+        return [func.lower(column).ilike(f"%{w}%") for w in words]
+
     async def search(
         self, store_id: uuid.UUID, query: str, scope: str | None = None
     ) -> IASearchResponse:
         results: list[IASearchResultItem] = []
-        q = f"%{query.strip().lower()}%"
 
         if scope is None or scope == "product":
             stmt = (
@@ -51,7 +64,7 @@ class InventoryIAService:
                 .where(
                     Product.store_id == store_id,
                     Product.is_active == True,  # noqa: E712
-                    func.lower(Product.name).ilike(q),
+                    *self._fuzzy_filters(Product.name, query),
                 )
                 .order_by(Product.name)
                 .limit(10)
@@ -72,7 +85,7 @@ class InventoryIAService:
                 .where(
                     Category.store_id == store_id,
                     Category.is_active == True,  # noqa: E712
-                    func.lower(Category.name).ilike(q),
+                    *self._fuzzy_filters(Category.name, query),
                 )
                 .order_by(Category.name)
                 .limit(10)
@@ -99,7 +112,7 @@ class InventoryIAService:
                 .where(
                     Brand.store_id == store_id,
                     Brand.is_active == True,  # noqa: E712
-                    func.lower(Brand.name).ilike(q),
+                    *self._fuzzy_filters(Brand.name, query),
                 )
                 .order_by(Brand.name)
                 .limit(10)
@@ -126,7 +139,7 @@ class InventoryIAService:
                 .where(
                     Supplier.store_id == store_id,
                     Supplier.is_active == True,  # noqa: E712
-                    func.lower(Supplier.name).ilike(q),
+                    *self._fuzzy_filters(Supplier.name, query),
                 )
                 .order_by(Supplier.name)
                 .limit(10)
