@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Brand, Category, Product
+from app.models.combo import Combo, ComboItem
 from app.models.pricing import PriceAdjustment, PriceAdjustmentItem
 from app.models.supplier import Supplier, SupplierBrand
 from app.schemas.pricing import (
@@ -147,6 +148,26 @@ class PricingIAService:
                     id=str(s.id), name=s.name, scope="supplier", product_count=count,
                 ))
 
+        if scope is None or scope == "combo":
+            stmt = (
+                select(Combo)
+                .where(
+                    Combo.store_id == store_id,
+                    Combo.is_active == True,  # noqa: E712
+                    *self._fuzzy_filters(Combo.name, query),
+                )
+                .order_by(Combo.name)
+                .limit(10)
+            )
+            rows = (await self.db.execute(stmt)).scalars().all()
+            for cb in rows:
+                results.append(PriceSearchResultItem(
+                    id=str(cb.id),
+                    name=cb.name,
+                    scope="combo",
+                    price=float(cb.price or 0),
+                ))
+
         return PriceSearchResponse(results=results)
 
     # ── Helpers ─────────────────────────────────────────
@@ -169,8 +190,22 @@ class PricingIAService:
                 SupplierBrand.supplier_id == target_id
             )
             base = base.where(Product.brand_id.in_(brand_ids_stmt))
+        elif target_scope == "combo":
+            # Combos no son productos — se manejan aparte
+            return []
         base = base.order_by(Product.name)
         return list((await self.db.execute(base)).scalars().all())
+
+    async def _get_combos_for_target(
+        self, store_id: uuid.UUID, target_id: uuid.UUID
+    ) -> list[Combo]:
+        """Devuelve el combo individual para ajustar su precio."""
+        stmt = select(Combo).where(
+            Combo.store_id == store_id,
+            Combo.id == target_id,
+            Combo.is_active == True,  # noqa: E712
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
 
     async def _get_target_name(self, target_scope: str, target_id: uuid.UUID) -> str:
         if target_scope == "product":
@@ -181,6 +216,8 @@ class PricingIAService:
             r = await self.db.execute(select(Brand.name).where(Brand.id == target_id))
         elif target_scope == "supplier":
             r = await self.db.execute(select(Supplier.name).where(Supplier.id == target_id))
+        elif target_scope == "combo":
+            r = await self.db.execute(select(Combo.name).where(Combo.id == target_id))
         else:
             return "?"
         return r.scalar_one_or_none() or "?"
@@ -219,50 +256,65 @@ class PricingIAService:
         action: str,
         value: float,
     ) -> PricePreviewResponse:
-        products = await self._get_products_for_target(store_id, target_scope, target_id)
         target_name = await self._get_target_name(target_scope, target_id)
-
         warnings: list[str] = []
         examples: list[PricePreviewExample] = []
         negatives = 0
         zeros = 0
         no_change = 0
 
-        for p in products:
-            current = float(p.base_price or 0)
-            new = round(self._calc_new_price(current, action, value), 2)
-
-            if new < 0:
-                negatives += 1
-            if new == 0 and current > 0:
-                zeros += 1
-            if new == current:
-                no_change += 1
-
-            if len(examples) < MAX_EXAMPLES:
-                examples.append(PricePreviewExample(
-                    name=p.name, before=current, after=max(0, new),
-                ))
+        if target_scope == "combo":
+            combos = await self._get_combos_for_target(store_id, target_id)
+            for cb in combos:
+                current = float(cb.price or 0)
+                new = round(self._calc_new_price(current, action, value), 2)
+                if new < 0:
+                    negatives += 1
+                if new == 0 and current > 0:
+                    zeros += 1
+                if new == current:
+                    no_change += 1
+                if len(examples) < MAX_EXAMPLES:
+                    examples.append(PricePreviewExample(
+                        name=cb.name, before=current, after=max(0, new),
+                    ))
+            total = len(combos)
+        else:
+            products = await self._get_products_for_target(store_id, target_scope, target_id)
+            for p in products:
+                current = float(p.base_price or 0)
+                new = round(self._calc_new_price(current, action, value), 2)
+                if new < 0:
+                    negatives += 1
+                if new == 0 and current > 0:
+                    zeros += 1
+                if new == current:
+                    no_change += 1
+                if len(examples) < MAX_EXAMPLES:
+                    examples.append(PricePreviewExample(
+                        name=p.name, before=current, after=max(0, new),
+                    ))
+            total = len(products)
 
         if negatives > 0:
             warnings.append(f"{negatives} producto(s) quedarian con precio negativo (se dejaran en $0)")
         if zeros > 0:
             warnings.append(f"{zeros} producto(s) quedaran con precio $0")
-        if no_change > 0 and no_change == len(products):
+        if no_change > 0 and no_change == total:
             warnings.append("Ningun producto cambia de precio con este ajuste")
         if action == "percent_up" and value > 50:
             warnings.append(f"Estas subiendo {value}% — es un aumento grande")
         if action == "percent_down" and value > 50:
             warnings.append(f"Estas bajando {value}% — es una reduccion grande")
-        if len(products) >= 50:
-            warnings.append(f"Este cambio afectara {len(products)} productos")
+        if total >= 50:
+            warnings.append(f"Este cambio afectara {total} productos")
 
         return PricePreviewResponse(
             target_name=target_name,
             target_scope=target_scope,
             action=action,
             value=value,
-            affected_count=len(products),
+            affected_count=total,
             warnings=warnings,
             examples=examples,
         )
@@ -278,7 +330,6 @@ class PricingIAService:
         action: str,
         value: float,
     ) -> PriceApplyResponse:
-        products = await self._get_products_for_target(store_id, target_scope, target_id)
         target_name = await self._get_target_name(target_scope, target_id)
 
         action_labels = {
@@ -295,31 +346,59 @@ class PricingIAService:
         }
         reason = f"Cambio IA — {action_labels.get(action, action)} — {target_scope}: {target_name}"
 
-        adjustment = PriceAdjustment(
-            store_id=store_id,
-            user_id=user_id,
-            reason=reason,
-            total_items=len(products),
-        )
-        self.db.add(adjustment)
-        await self.db.flush()
-
-        applied = 0
-        for p in products:
-            current = float(p.base_price or 0)
-            new = round(self._calc_new_price(current, action, value), 2)
-            if new < 0:
-                new = 0
-
-            item = PriceAdjustmentItem(
-                adjustment_id=adjustment.id,
-                product_id=p.id,
-                previous_price=current,
-                new_price=new,
+        if target_scope == "combo":
+            combos = await self._get_combos_for_target(store_id, target_id)
+            adjustment = PriceAdjustment(
+                store_id=store_id,
+                user_id=user_id,
+                reason=reason,
+                total_items=len(combos),
             )
-            self.db.add(item)
-            p.base_price = new
-            applied += 1
+            self.db.add(adjustment)
+            await self.db.flush()
+
+            applied = 0
+            for cb in combos:
+                current = float(cb.price or 0)
+                new = round(self._calc_new_price(current, action, value), 2)
+                if new < 0:
+                    new = 0
+                item = PriceAdjustmentItem(
+                    adjustment_id=adjustment.id,
+                    product_id=None,
+                    combo_id=cb.id,
+                    previous_price=current,
+                    new_price=new,
+                )
+                self.db.add(item)
+                cb.price = new
+                applied += 1
+        else:
+            products = await self._get_products_for_target(store_id, target_scope, target_id)
+            adjustment = PriceAdjustment(
+                store_id=store_id,
+                user_id=user_id,
+                reason=reason,
+                total_items=len(products),
+            )
+            self.db.add(adjustment)
+            await self.db.flush()
+
+            applied = 0
+            for p in products:
+                current = float(p.base_price or 0)
+                new = round(self._calc_new_price(current, action, value), 2)
+                if new < 0:
+                    new = 0
+                item = PriceAdjustmentItem(
+                    adjustment_id=adjustment.id,
+                    product_id=p.id,
+                    previous_price=current,
+                    new_price=new,
+                )
+                self.db.add(item)
+                p.base_price = new
+                applied += 1
 
         adjustment.total_items = applied
         await self.db.flush()
@@ -363,12 +442,20 @@ class PricingIAService:
 
         undone = 0
         for item in items:
-            product = (await self.db.execute(
-                select(Product).where(Product.id == item.product_id)
-            )).scalar_one_or_none()
-            if product:
-                product.base_price = float(item.previous_price)
-                undone += 1
+            if item.combo_id:
+                combo = (await self.db.execute(
+                    select(Combo).where(Combo.id == item.combo_id)
+                )).scalar_one_or_none()
+                if combo:
+                    combo.price = float(item.previous_price)
+                    undone += 1
+            elif item.product_id:
+                product = (await self.db.execute(
+                    select(Product).where(Product.id == item.product_id)
+                )).scalar_one_or_none()
+                if product:
+                    product.base_price = float(item.previous_price)
+                    undone += 1
 
         adj.reason = f"REVERTIDO — {adj.reason}"
         await self.db.flush()

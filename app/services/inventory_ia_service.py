@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.catalog import Brand, Category, Product
+from app.models.combo import Combo, ComboItem
 from app.models.inventory import InventoryAdjustment, InventoryAdjustmentItem
 from app.models.supplier import Supplier, SupplierBrand
 from app.models.user import User
@@ -164,6 +165,33 @@ class InventoryIAService:
                     product_count=count,
                 ))
 
+        if scope is None or scope == "combo":
+            stmt = (
+                select(Combo)
+                .where(
+                    Combo.store_id == store_id,
+                    Combo.is_active == True,  # noqa: E712
+                    *self._fuzzy_filters(Combo.name, query),
+                )
+                .order_by(Combo.name)
+                .limit(10)
+            )
+            rows = (await self.db.execute(stmt)).scalars().all()
+            for cb in rows:
+                # Count products inside the combo
+                count = (await self.db.execute(
+                    select(func.count()).select_from(ComboItem).where(
+                        ComboItem.combo_id == cb.id,
+                    )
+                )).scalar() or 0
+                results.append(IASearchResultItem(
+                    id=str(cb.id),
+                    name=cb.name,
+                    scope="combo",
+                    product_count=count,
+                    extra=f"${float(cb.price):.2f}",
+                ))
+
         return IASearchResponse(results=results)
 
     # ── Helpers ─────────────────────────────────────────────
@@ -188,6 +216,11 @@ class InventoryIAService:
                 SupplierBrand.supplier_id == target_id
             )
             base = base.where(Product.brand_id.in_(brand_ids_stmt))
+        elif target_scope == "combo":
+            product_ids_stmt = select(ComboItem.product_id).where(
+                ComboItem.combo_id == target_id
+            )
+            base = base.where(Product.id.in_(product_ids_stmt))
 
         base = base.order_by(Product.name)
         return list((await self.db.execute(base)).scalars().all())
@@ -201,6 +234,8 @@ class InventoryIAService:
             r = await self.db.execute(select(Brand.name).where(Brand.id == target_id))
         elif target_scope == "supplier":
             r = await self.db.execute(select(Supplier.name).where(Supplier.id == target_id))
+        elif target_scope == "combo":
+            r = await self.db.execute(select(Combo.name).where(Combo.id == target_id))
         else:
             return "?"
         return r.scalar_one_or_none() or "?"

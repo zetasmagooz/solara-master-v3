@@ -10,6 +10,7 @@ class PriceSearchScope(str, Enum):
     category = "category"
     brand = "brand"
     supplier = "supplier"
+    combo = "combo"
 
 
 # ── Action types ──

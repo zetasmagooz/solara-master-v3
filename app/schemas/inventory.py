@@ -149,6 +149,7 @@ class IASearchScope(str, Enum):
     category = "category"
     brand = "brand"
     supplier = "supplier"
+    combo = "combo"
 
 
 class IAActionType(str, Enum):
