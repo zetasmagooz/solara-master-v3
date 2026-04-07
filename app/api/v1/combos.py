@@ -104,6 +104,21 @@ async def update_combo(
     return await service.get_combo(combo_id)
 
 
+@router.patch("/{combo_id}/favorite", response_model=ComboResponse)
+async def toggle_combo_favorite(
+    combo_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Toggle favorito de un combo."""
+    service = CatalogService(db)
+    combo = await service.get_combo(combo_id)
+    if not combo:
+        raise HTTPException(status_code=404, detail="Combo not found")
+    await service.update_combo(combo_id, is_favorite=not combo.is_favorite)
+    return await service.get_combo(combo_id)
+
+
 @router.delete("/{combo_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_combo(
     combo_id: UUID,

@@ -534,6 +534,7 @@ class ComboUpdate(BaseModel):
     image_url: str | None = None
     show_in_kiosk: bool | None = None
     is_active: bool | None = None
+    is_favorite: bool | None = None
 
 
 class ComboItemCreate(BaseModel):
@@ -578,6 +579,7 @@ class ComboResponse(BaseModel):
     price: float
     image_url: str | None = None
     is_active: bool
+    is_favorite: bool = False
     show_in_kiosk: bool
     created_at: datetime | None = None
     items: list[ComboItemResponse] = []

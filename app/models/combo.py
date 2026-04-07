@@ -19,6 +19,7 @@ class Combo(Base):
     price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     image_url: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False)
     show_in_kiosk: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
