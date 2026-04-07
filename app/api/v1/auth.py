@@ -71,12 +71,7 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
     service = AuthService(db)
     try:
         user, auto_detected_store = await service.authenticate(data)
-    except ValueError as e:
-        if str(e) == "LOCATION_OUT_OF_RANGE":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No estás dentro del rango de tu tienda. Debes estar a menos de 15 metros.",
-            )
+    except ValueError:
         raise
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
