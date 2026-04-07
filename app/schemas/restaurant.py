@@ -65,6 +65,7 @@ class TableOrderItemData(BaseModel):
     unit_price: float
     modifiers_json: list[dict] = []
     removed_supplies_json: list[dict] = []
+    special_note: str | None = None
 
 
 class AddOrderRequest(BaseModel):
