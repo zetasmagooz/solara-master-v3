@@ -392,7 +392,7 @@ class WarehouseService:
             # Restar stock del almacén
             source_product.stock = float(source_product.stock or 0) - quantity
 
-            # Buscar producto en tienda destino por sku o barcode
+            # Buscar producto en tienda destino por sku, barcode, transferencia previa o nombre
             target_product = None
             if source_product.sku:
                 result = await self.db.execute(
@@ -408,6 +408,37 @@ class WarehouseService:
                     select(Product).where(
                         Product.store_id == target_store_id,
                         Product.barcode == source_product.barcode,
+                    )
+                )
+                target_product = result.scalar_one_or_none()
+
+            # Fallback: buscar por transferencia previa del mismo producto a la misma tienda
+            if not target_product:
+                result = await self.db.execute(
+                    select(WarehouseTransferItem.target_product_id)
+                    .join(WarehouseTransfer, WarehouseTransfer.id == WarehouseTransferItem.transfer_id)
+                    .where(
+                        WarehouseTransfer.target_store_id == target_store_id,
+                        WarehouseTransferItem.product_id == source_product.id,
+                        WarehouseTransferItem.target_product_id.isnot(None),
+                    )
+                    .order_by(WarehouseTransferItem.id.desc())
+                    .limit(1)
+                )
+                prev_target_id = result.scalar_one_or_none()
+                if prev_target_id:
+                    result = await self.db.execute(
+                        select(Product).where(Product.id == prev_target_id)
+                    )
+                    target_product = result.scalar_one_or_none()
+
+            # Fallback: buscar por nombre exacto en la tienda destino
+            if not target_product:
+                result = await self.db.execute(
+                    select(Product).where(
+                        Product.store_id == target_store_id,
+                        Product.name == source_product.name,
+                        Product.is_active == True,
                     )
                 )
                 target_product = result.scalar_one_or_none()
