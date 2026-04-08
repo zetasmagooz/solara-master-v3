@@ -12,6 +12,14 @@ class CustomerCreate(BaseModel):
     phone: str
     gender: str | None = None
     birth_date: date | None = None
+    address_street: str | None = None
+    address_ext_number: str | None = None
+    address_int_number: str | None = None
+    address_neighborhood: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_postal_code: str | None = None
+    address_country: str | None = "MX"
 
 
 class CustomerQuickCreate(BaseModel):
@@ -31,6 +39,14 @@ class CustomerUpdate(BaseModel):
     gender: str | None = None
     birth_date: date | None = None
     is_active: bool | None = None
+    address_street: str | None = None
+    address_ext_number: str | None = None
+    address_int_number: str | None = None
+    address_neighborhood: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_postal_code: str | None = None
+    address_country: str | None = None
 
 
 class CustomerImageUpload(BaseModel):
@@ -48,6 +64,14 @@ class CustomerResponse(BaseModel):
     gender: str | None = None
     birth_date: date | None = None
     image_url: str | None = None
+    address_street: str | None = None
+    address_ext_number: str | None = None
+    address_int_number: str | None = None
+    address_neighborhood: str | None = None
+    address_city: str | None = None
+    address_state: str | None = None
+    address_postal_code: str | None = None
+    address_country: str | None = None
     visit_count: int = 0
     is_active: bool = True
     total_spent: float = 0
