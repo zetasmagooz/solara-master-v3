@@ -983,6 +983,37 @@ class CatalogService:
         await self.db.flush()
         return True
 
+    # --- Export for template ---
+    async def get_all_products_for_export(self, store_id: UUID) -> list[dict]:
+        """Retorna todos los productos activos con sus nombres de categoría, subcategoría y marca."""
+        stmt = (
+            select(
+                Product.id,
+                Product.name,
+                Product.base_price,
+                Product.description,
+                Product.sku,
+                Product.barcode,
+                Product.cost_price,
+                Product.stock,
+                Product.min_stock,
+                Product.max_stock,
+                Product.expiry_date,
+                Product.show_in_pos,
+                Product.show_in_kiosk,
+                Category.name.label("category_name"),
+                Subcategory.name.label("subcategory_name"),
+                Brand.name.label("brand_name"),
+            )
+            .outerjoin(Category, Product.category_id == Category.id)
+            .outerjoin(Subcategory, Product.subcategory_id == Subcategory.id)
+            .outerjoin(Brand, Product.brand_id == Brand.id)
+            .where(Product.store_id == store_id, Product.is_active.is_(True))
+            .order_by(Product.name)
+        )
+        result = await self.db.execute(stmt)
+        return [dict(row._mapping) for row in result.all()]
+
     # --- Bulk Import ---
     async def _resolve_or_create_bulk(
         self,
@@ -1093,8 +1124,9 @@ class CatalogService:
                         if sub.category_id == pid and sub.name.lower().strip() == sname.lower().strip():
                             subcat_map[key] = sub.id
 
-        # 4. Validate all rows and build insert dicts
-        valid_rows: list[dict] = []
+        # 4. Validate rows and separate into insert vs update
+        insert_rows: list[dict] = []
+        update_rows: list[tuple[UUID, dict]] = []  # (product_id, fields)
         for r in rows:
             row_num = r["row_number"]
             name = (r.get("name") or "").strip()
@@ -1115,8 +1147,7 @@ class CatalogService:
             sub_name = (r.get("subcategory_name") or "").strip()
             b_name = (r.get("brand_name") or "").strip()
 
-            valid_rows.append({
-                "store_id": store_id,
+            fields = {
                 "name": name,
                 "base_price": base_price,
                 "description": r.get("description") or None,
@@ -1132,12 +1163,42 @@ class CatalogService:
                 "expiry_date": r.get("expiry_date"),
                 "show_in_pos": r.get("show_in_pos", True),
                 "show_in_kiosk": r.get("show_in_kiosk", True),
-            })
+            }
 
-        # 5. Bulk INSERT in chunks using raw INSERT ... VALUES (bypasses ORM per-row overhead)
-        if valid_rows:
-            for i in range(0, len(valid_rows), CHUNK_SIZE):
-                chunk = valid_rows[i : i + CHUNK_SIZE]
+            # Determinar si es update o insert
+            product_id = r.get("product_id")
+            if product_id:
+                update_rows.append((product_id, fields))
+            else:
+                fields["store_id"] = store_id
+                insert_rows.append(fields)
+
+        updated_count = 0
+        # 5a. Bulk UPDATE existing products
+        if update_rows:
+            for pid, fields in update_rows:
+                try:
+                    result = await self.db.execute(
+                        select(Product).where(Product.id == pid, Product.store_id == store_id)
+                    )
+                    product = result.scalar_one_or_none()
+                    if product:
+                        for k, v in fields.items():
+                            setattr(product, k, v)
+                        updated_count += 1
+                    else:
+                        # ID no encontrado, insertar como nuevo
+                        fields["store_id"] = store_id
+                        insert_rows.append(fields)
+                except Exception:
+                    fields["store_id"] = store_id
+                    insert_rows.append(fields)
+            await self.db.flush()
+
+        # 5b. Bulk INSERT new products
+        if insert_rows:
+            for i in range(0, len(insert_rows), CHUNK_SIZE):
+                chunk = insert_rows[i : i + CHUNK_SIZE]
                 stmt = pg_insert(Product).values(chunk).returning(Product.id)
                 result = await self.db.execute(stmt)
                 chunk_ids = [str(row[0]) for row in result.fetchall()]
@@ -1145,7 +1206,9 @@ class CatalogService:
 
         return {
             "total_rows": len(rows),
-            "success_count": len(created_ids),
+            "success_count": len(created_ids) + updated_count,
+            "created_count": len(created_ids),
+            "updated_count": updated_count,
             "error_count": len(errors),
             "errors": errors,
             "created_product_ids": created_ids,

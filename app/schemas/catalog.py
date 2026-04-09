@@ -590,6 +590,7 @@ class ComboResponse(BaseModel):
 # --- Bulk Import ---
 class BulkImportProductRow(BaseModel):
     row_number: int
+    product_id: UUID | None = None  # Si viene, es update; si no, es insert
     name: str
     base_price: float
     description: str | None = None
@@ -621,6 +622,8 @@ class BulkImportRowError(BaseModel):
 class BulkImportResponse(BaseModel):
     total_rows: int
     success_count: int
+    created_count: int = 0
+    updated_count: int = 0
     error_count: int
     errors: list[BulkImportRowError]
     created_product_ids: list[str]

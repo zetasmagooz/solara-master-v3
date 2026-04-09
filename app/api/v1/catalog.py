@@ -554,6 +554,95 @@ async def download_import_template():
     )
 
 
+@router.get("/products/export-template")
+async def export_products_template(
+    store_id: Annotated[UUID, Query()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Genera plantilla Excel pre-llenada con los productos existentes de la tienda."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    service = CatalogService(db)
+    products = await service.get_all_products_for_export(store_id)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Productos"
+
+    headers = [
+        ("ID", False),
+        ("Nombre*", True),
+        ("Precio de Venta*", True),
+        ("Descripción", False),
+        ("SKU", False),
+        ("Código de Barras", False),
+        ("Precio de Costo", False),
+        ("Stock", False),
+        ("Stock Mínimo", False),
+        ("Stock Máximo", False),
+        ("Categoría", False),
+        ("Subcategoría", False),
+        ("Marca", False),
+        ("Fecha de Caducidad", False),
+        ("Mostrar en POS", False),
+        ("Mostrar en Kiosko", False),
+    ]
+
+    orange_fill = PatternFill(start_color="FF8C00", end_color="FF8C00", fill_type="solid")
+    blue_fill = PatternFill(start_color="4A90D9", end_color="4A90D9", fill_type="solid")
+    gray_fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    widths = [36, 25, 18, 35, 15, 18, 18, 12, 14, 14, 20, 20, 20, 18, 16, 16]
+
+    for col_idx, (header_text, is_required) in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header_text)
+        if header_text == "ID":
+            cell.fill = gray_fill
+        elif is_required:
+            cell.fill = orange_fill
+        else:
+            cell.fill = blue_fill
+        cell.font = header_font
+        cell.alignment = header_align
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths[col_idx - 1]
+
+    ws.row_dimensions[1].height = 30
+
+    # Fill product rows
+    for row_idx, p in enumerate(products, 2):
+        ws.cell(row=row_idx, column=1, value=str(p["id"]))
+        ws.cell(row=row_idx, column=2, value=p["name"])
+        ws.cell(row=row_idx, column=3, value=p["base_price"])
+        ws.cell(row=row_idx, column=4, value=p.get("description") or "")
+        ws.cell(row=row_idx, column=5, value=p.get("sku") or "")
+        ws.cell(row=row_idx, column=6, value=p.get("barcode") or "")
+        ws.cell(row=row_idx, column=7, value=p.get("cost_price") or "")
+        ws.cell(row=row_idx, column=8, value=p.get("stock", 0))
+        ws.cell(row=row_idx, column=9, value=p.get("min_stock", 0))
+        ws.cell(row=row_idx, column=10, value=p.get("max_stock") or "")
+        ws.cell(row=row_idx, column=11, value=p.get("category_name") or "")
+        ws.cell(row=row_idx, column=12, value=p.get("subcategory_name") or "")
+        ws.cell(row=row_idx, column=13, value=p.get("brand_name") or "")
+        ws.cell(row=row_idx, column=14, value=str(p["expiry_date"]) if p.get("expiry_date") else "")
+        ws.cell(row=row_idx, column=15, value="SI" if p.get("show_in_pos", True) else "NO")
+        ws.cell(row=row_idx, column=16, value="SI" if p.get("show_in_kiosk", True) else "NO")
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=productos_tienda.xlsx"},
+    )
+
+
 @router.post("/products/bulk-import", response_model=BulkImportResponse)
 async def bulk_import_products(
     store_id: Annotated[UUID, Query()],
