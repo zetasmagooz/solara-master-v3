@@ -522,6 +522,23 @@ class CatalogService:
         )
         return self._supply_to_response(result.scalar_one())
 
+    async def _recalculate_product_cost_from_supplies(self, product_id: UUID) -> None:
+        """Recalcula Product.cost_price como SUM(cost_per_product) de todos sus insumos."""
+        result = await self.db.execute(
+            select(func.coalesce(func.sum(ProductSupply.cost_per_product), 0)).where(
+                ProductSupply.product_id == product_id
+            )
+        )
+        total_cost = float(result.scalar() or 0)
+
+        product_result = await self.db.execute(
+            select(Product).where(Product.id == product_id)
+        )
+        product = product_result.scalar_one_or_none()
+        if product:
+            product.cost_price = round(total_cost, 4)
+            await self.db.flush()
+
     async def create_product_supply(self, product_id: UUID, **kwargs) -> ProductSupply:
         # Calcular conversión si el supply tiene unit_type
         supply_id = kwargs.get("supply_id")
@@ -544,6 +561,8 @@ class CatalogService:
         ps = ProductSupply(product_id=product_id, **kwargs)
         self.db.add(ps)
         await self.db.flush()
+        # Auto-recalcular cost_price del producto
+        await self._recalculate_product_cost_from_supplies(product_id)
         # Reload with supply relation
         result = await self.db.execute(
             select(ProductSupply)
@@ -588,6 +607,7 @@ class CatalogService:
         await self.db.flush()
 
         # Recalcular cost_per_product de todos los product_supplies vinculados
+        affected_product_ids: set = set()
         if cost_changed and supply.unit_type:
             ps_result = await self.db.execute(
                 select(ProductSupply).where(ProductSupply.supply_id == supply_id)
@@ -600,7 +620,12 @@ class CatalogService:
                     ps.cost_per_product = calculate_cost(
                         float(ps.quantity), supply.unit_type, ps.unit, float(supply.cost_per_unit)
                     )
+                    affected_product_ids.add(ps.product_id)
             await self.db.flush()
+
+            # Auto-recalcular cost_price de todos los productos afectados
+            for pid in affected_product_ids:
+                await self._recalculate_product_cost_from_supplies(pid)
 
         # Recargar con relaciones
         result = await self.db.execute(
@@ -651,6 +676,8 @@ class CatalogService:
             )
 
         await self.db.flush()
+        # Auto-recalcular cost_price del producto
+        await self._recalculate_product_cost_from_supplies(ps.product_id)
         return ps
 
     async def delete_product_supply(self, ps_id: UUID) -> bool:
@@ -658,8 +685,11 @@ class CatalogService:
         ps = result.scalar_one_or_none()
         if not ps:
             return False
+        product_id = ps.product_id
         await self.db.delete(ps)
         await self.db.flush()
+        # Auto-recalcular cost_price del producto
+        await self._recalculate_product_cost_from_supplies(product_id)
         return True
 
     # --- Modifier Groups ---
