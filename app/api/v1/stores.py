@@ -149,8 +149,10 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
     features = plan.features or {}
     max_stores = features.get("max_stores", 1)
     price_extra = features.get("price_per_additional_store", 0)
-    free_stores = features.get("free_stores", 1)
-    additional = max(0, active_count - free_stores)
+    # free_stores = adicionales gratis ADEMÁS de la principal (que siempre va incluida)
+    free_stores = features.get("free_stores", 0)
+    included_total = 1 + free_stores  # 1 principal + N adicionales del plan
+    additional = max(0, active_count - included_total)
 
     can_add = max_stores == -1 or active_count < max_stores
 
@@ -166,7 +168,7 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
         )
     )
     billable_count = billable_result.scalar() or 0
-    billable_additional = max(0, billable_count - free_stores)
+    billable_additional = max(0, billable_count - included_total)
     pending_billing = active_count - billable_count
 
     return {
@@ -177,6 +179,7 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
         "plan_slug": plan.slug,
         "can_add_store": can_add,
         "free_stores": free_stores,
+        "included_total": included_total,
         "additional_stores_count": additional,
         "additional_stores_cost": additional * price_extra,
         "billable_stores_count": billable_count,
@@ -349,6 +352,16 @@ async def create_store(
     db.add(config)
     await db.flush()
 
+    # Sincronizar cantidad de tiendas adicionales en Stripe (best-effort)
+    if org_id:
+        try:
+            from app.services.stripe_billing import StripeBillingService
+            await StripeBillingService(db).sync_extra_stores_quantity(org_id)
+            await db.commit()
+        except Exception as e:
+            import logging as _l
+            _l.getLogger(__name__).warning(f"[STORES] sync_extra_stores_quantity falló: {e}")
+
     return store
 
 
@@ -474,6 +487,17 @@ async def toggle_store_active(
         store.is_active = True
 
     await db.flush()
+
+    # Sincronizar cantidad de tiendas adicionales en Stripe (best-effort)
+    if store.organization_id:
+        try:
+            from app.services.stripe_billing import StripeBillingService
+            await StripeBillingService(db).sync_extra_stores_quantity(store.organization_id)
+            await db.commit()
+        except Exception as e:
+            import logging as _l
+            _l.getLogger(__name__).warning(f"[STORES] sync_extra_stores_quantity falló: {e}")
+
     return store
 
 

@@ -1,5 +1,20 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-11
+
+### feat: Cobro de tiendas adicionales en Stripe (multi-item subscription)
+- Nueva columna `plans.stripe_additional_store_price_id` para guardar el Stripe Price del cobro por tienda extra
+- `stripe_billing._ensure_additional_store_price(plan)`: crea/recupera el Stripe Product+Price recurrente para tienda adicional. Si el monto cambió, archiva el viejo y crea uno nuevo (Stripe Prices son inmutables)
+- `stripe_billing.sync_extra_stores_quantity(org_id)`: sincroniza la quantity del item adicional en la sub Stripe (crea/actualiza/elimina con prorrateo automático)
+- `create_subscription` ahora arranca subs con dos items: `{base_plan, qty=1}` + `{additional_store, qty=N}` cuando hay extras facturables
+- Hook automático en `POST /stores/` y `PATCH /stores/{id}/toggle-active` → llama a sync (best-effort)
+- `update_plan` (backoffice): cuando cambia `features.price_per_additional_store`, recrea el Stripe Price y reemplaza el item en TODAS las subs activas del plan, con prorrateo
+
+### fix: Unificación de la fórmula de billing por tiendas (semántica `free_stores`)
+- Fórmula canónica: `extras = max(0, billable_count - 1 - free_stores)` (la principal siempre va incluida)
+- `app/api/v1/stores.py`: agrega `included_total = 1 + free_stores` y usa la nueva fórmula
+- `backoffice_service.get_org_billing` y `get_billing_summary`: dejan de usar `max_stores` (que era hard-limit) y usan `free_stores` para el cálculo del cobro. Nuevos campos en respuesta: `free_stores`, `included_total`, `extra_stores`, `price_per_extra_store`, `extra_stores_total`, `next_extra_stores`, `next_month_total`
+
 ## 2026-03-24
 
 ### feat: Integración EcartPay Terminal API

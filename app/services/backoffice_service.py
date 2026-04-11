@@ -460,6 +460,57 @@ class BackofficeService:
                     except Exception:
                         pass
 
+            # ── Sincronizar precio de "tienda adicional" ──
+            # Si cambió price_per_additional_store en features, hay que:
+            # 1) Crear nuevo Stripe Price (o desactivar viejo)
+            # 2) Reemplazar el item adicional en TODAS las subs activas del plan
+            old_extra = float((old_features or {}).get("price_per_additional_store", 0) or 0)
+            new_extra = float((plan.features or {}).get("price_per_additional_store", 0) or 0)
+            if abs(old_extra - new_extra) > 0.01:
+                from app.services.stripe_billing import StripeBillingService
+                billing_svc = StripeBillingService(db)
+                try:
+                    await billing_svc._ensure_additional_store_price(plan)
+                    new_addon_price_id = plan.stripe_additional_store_price_id
+
+                    # Iterar subs activas del plan y reemplazar item adicional
+                    active_subs_q = await db.execute(
+                        select(StripeSubscription)
+                        .join(OrganizationSubscription, OrganizationSubscription.id == StripeSubscription.org_subscription_id)
+                        .where(
+                            OrganizationSubscription.plan_id == plan_id,
+                            StripeSubscription.status.in_(["active", "trialing", "past_due"]),
+                        )
+                    )
+                    for ss in active_subs_q.scalars().all():
+                        try:
+                            sub_obj = stripe.Subscription.retrieve(ss.stripe_subscription_id)
+                            items_data = (sub_obj.get("items") or {}).get("data", []) if hasattr(sub_obj, "get") else []
+                            for it in items_data:
+                                price = it.get("price") if hasattr(it, "get") else it["price"]
+                                price_meta = (price.get("metadata") if hasattr(price, "get") else price["metadata"]) or {}
+                                if price_meta.get("kind") == "additional_store":
+                                    item_id = it["id"] if hasattr(it, "__getitem__") else it.id
+                                    qty = int(it.get("quantity") or 0) if hasattr(it, "get") else int(getattr(it, "quantity", 0) or 0)
+                                    if new_addon_price_id and qty > 0:
+                                        stripe.SubscriptionItem.modify(
+                                            item_id,
+                                            price=new_addon_price_id,
+                                            proration_behavior="always_invoice",
+                                        )
+                                    else:
+                                        stripe.SubscriptionItem.delete(item_id, proration_behavior="create_prorations")
+                                    break
+                            else:
+                                # No tenía item adicional → llamar sync para que lo agregue si corresponde
+                                await billing_svc.sync_extra_stores_quantity(ss.organization_id)
+                        except Exception as e:
+                            import logging as _l
+                            _l.getLogger(__name__).warning(f"[update_plan] swap addon price falló sub={ss.stripe_subscription_id}: {e}")
+                except Exception as e:
+                    import logging as _l
+                    _l.getLogger(__name__).warning(f"[update_plan] _ensure_additional_store_price falló: {e}")
+
         return {"id": plan.id, "name": plan.name, "price_monthly": new_price, "stripe_price_id": plan.stripe_price_id}
 
     # ── Bloqueos ─────────────────────────────────────────
@@ -905,23 +956,18 @@ class BackofficeService:
 
         sub, plan = sub_row[0], sub_row[1]
         features = plan.features or {}
-        max_stores = features.get("max_stores", 1)
-        price_extra = features.get("price_per_additional_store", 0)
+        # free_stores = adicionales gratis ADEMÁS de la principal
+        free_stores = features.get("free_stores", 0)
+        included_total = 1 + free_stores
+        price_extra = float(features.get("price_per_additional_store", 0) or 0)
 
         # Cobro actual: solo tiendas ya facturables
-        if max_stores == -1:
-            extra_stores = 0
-        else:
-            extra_stores = max(0, billable_count - max_stores)
-
+        extra_stores = max(0, billable_count - included_total)
         extra_total = extra_stores * price_extra
         monthly_total = float(plan.price_monthly) + extra_total
 
-        # Cobro próximo mes: todas las tiendas activas
-        if max_stores == -1:
-            next_extra = 0
-        else:
-            next_extra = max(0, store_count - max_stores)
+        # Cobro próximo mes: todas las tiendas activas (incluye las pendientes)
+        next_extra = max(0, store_count - included_total)
         next_month_total = float(plan.price_monthly) + (next_extra * price_extra)
 
         return {
@@ -929,13 +975,16 @@ class BackofficeService:
             "organization_name": org.name,
             "plan_name": plan.name,
             "plan_price": float(plan.price_monthly),
-            "max_stores_included": max_stores,
+            "free_stores": free_stores,
+            "included_total": included_total,
             "current_stores": store_count,
+            "billable_stores": billable_count,
             "extra_stores": extra_stores,
             "price_per_extra_store": price_extra,
             "extra_stores_total": extra_total,
             "monthly_total": monthly_total,
             "pending_billing_count": pending_billing,
+            "next_extra_stores": next_extra,
             "next_month_total": next_month_total,
             "subscription_status": sub.status,
             "started_at": sub.started_at,
@@ -1107,9 +1156,10 @@ class BackofficeService:
                 )
             )).scalar() or 0
 
-            max_stores = features.get("max_stores", 1)
-            price_extra = features.get("price_per_additional_store", 0)
-            extra_stores = max(0, store_count - max_stores) if max_stores != -1 else 0
+            free_stores = features.get("free_stores", 0)
+            included_total = 1 + free_stores
+            price_extra = float(features.get("price_per_additional_store", 0) or 0)
+            extra_stores = max(0, store_count - included_total)
             extra_total = extra_stores * price_extra
             monthly_total = plan_price + extra_total
 
@@ -1163,6 +1213,11 @@ class BackofficeService:
                 "owner_email": row.owner_email,
                 "plan_name": row.plan_name,
                 "plan_price": plan_price,
+                "store_count": store_count,
+                "free_stores": free_stores,
+                "included_total": included_total,
+                "extra_stores": extra_stores,
+                "price_per_extra_store": price_extra,
                 "extra_stores_total": extra_total,
                 "monthly_total": monthly_total,
                 "total_sales": total_sales,

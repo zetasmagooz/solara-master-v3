@@ -1,15 +1,19 @@
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import stripe
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.models.organization import Organization
+from app.models.store import Store
 from app.models.stripe import StripeCustomer, StripeInvoice, StripePaymentMethod, StripeSubscription
 from app.models.subscription import OrganizationSubscription, Plan
+
+logger = logging.getLogger(__name__)
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
@@ -218,6 +222,149 @@ class StripeBillingService:
         await self.db.delete(pm)
         await self.db.flush()
 
+    # ─── Additional Store Pricing (helpers) ──────────────────
+
+    async def _ensure_additional_store_price(self, plan: Plan) -> str | None:
+        """Garantiza que exista un Stripe Price para el cobro de tienda adicional del plan.
+        Si no existe o el precio cambió, crea uno nuevo (Stripe Prices son inmutables) y
+        actualiza plan.stripe_additional_store_price_id. Retorna el price_id resultante o None
+        si el plan no cobra extras.
+        """
+        features = plan.features or {}
+        amount = float(features.get("price_per_additional_store", 0) or 0)
+        if amount <= 0:
+            return None
+
+        _require_stripe_keys()
+
+        # Si ya hay un price_id, validar que su monto coincida
+        if plan.stripe_additional_store_price_id:
+            try:
+                existing = stripe.Price.retrieve(plan.stripe_additional_store_price_id)
+                existing_amount = (existing.get("unit_amount") or 0) / 100
+                if abs(existing_amount - amount) < 0.01 and existing.get("active"):
+                    return plan.stripe_additional_store_price_id
+                # Precio cambió → desactivar el viejo
+                try:
+                    stripe.Price.modify(plan.stripe_additional_store_price_id, active=False)
+                except Exception as e:
+                    logger.warning(f"[STRIPE] No se pudo desactivar price viejo: {e}")
+            except Exception as e:
+                logger.warning(f"[STRIPE] Price viejo no encontrado: {e}")
+
+        # Crear nuevo price recurrente mensual
+        product_name = f"Tienda adicional - {plan.name}"
+        # Buscar o crear el producto
+        product_id = None
+        try:
+            # Intentar reutilizar producto buscando en metadata
+            search = stripe.Product.search(query=f"metadata['plan_id']:'{plan.id}' AND metadata['kind']:'additional_store'")
+            if search.data:
+                product_id = search.data[0].id
+        except Exception:
+            pass
+
+        if not product_id:
+            product = stripe.Product.create(
+                name=product_name,
+                metadata={"plan_id": str(plan.id), "kind": "additional_store"},
+            )
+            product_id = product.id
+
+        new_price = stripe.Price.create(
+            product=product_id,
+            unit_amount=int(round(amount * 100)),
+            currency="mxn",
+            recurring={"interval": "month"},
+            metadata={"plan_id": str(plan.id), "kind": "additional_store"},
+        )
+        plan.stripe_additional_store_price_id = new_price.id
+        await self.db.flush()
+        logger.info(f"[STRIPE] Price adicional creado para {plan.name}: {new_price.id} (${amount})")
+        return new_price.id
+
+    async def _count_billable_extra_stores(self, organization_id: uuid.UUID, plan: Plan) -> int:
+        """Calcula tiendas extras facturables (semántica B: extras = max(0, billable - 1 - free_stores))."""
+        features = plan.features or {}
+        free_stores = int(features.get("free_stores", 0) or 0)
+        included_total = 1 + free_stores
+        now = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            select(func.count(Store.id)).where(
+                Store.organization_id == organization_id,
+                Store.is_warehouse.isnot(True),
+                Store.is_active.is_(True),
+                Store.billing_starts_at <= now,
+            )
+        )
+        billable_count = int(result.scalar() or 0)
+        return max(0, billable_count - included_total)
+
+    async def sync_extra_stores_quantity(self, organization_id: uuid.UUID) -> dict | None:
+        """Sincroniza la cantidad de tiendas adicionales en la suscripción Stripe.
+        Si no hay item adicional aún, lo agrega. Si la quantity cambió, la actualiza
+        con prorrateo automático. Retorna info del cambio o None si no aplica."""
+        _require_stripe_keys()
+        existing_sub = await self._get_active_stripe_subscription(organization_id)
+        if not existing_sub:
+            return None
+
+        # Obtener plan actual
+        plan_result = await self.db.execute(
+            select(Plan).where(Plan.stripe_price_id == existing_sub.stripe_price_id)
+        )
+        plan = plan_result.scalar_one_or_none()
+        if not plan:
+            return None
+
+        extra_qty = await self._count_billable_extra_stores(organization_id, plan)
+        addon_price_id = await self._ensure_additional_store_price(plan)
+
+        # Si el plan no cobra extras o no hay extras, no hacemos nada (o removemos item si existía)
+        stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
+        items = self._get_sub_field(stripe_sub_obj, "items")
+        item_data = items.get("data", []) if items else []
+
+        # Buscar el item adicional existente (si lo hay)
+        addon_item = None
+        for it in item_data:
+            price = self._get_sub_field(it, "price") or {}
+            price_meta = self._get_sub_field(price, "metadata") or {}
+            if price_meta.get("kind") == "additional_store":
+                addon_item = it
+                break
+
+        if not addon_price_id or extra_qty == 0:
+            # Si existía un addon item, removerlo
+            if addon_item:
+                addon_item_id = self._get_sub_field(addon_item, "id")
+                stripe.SubscriptionItem.delete(addon_item_id, proration_behavior="create_prorations")
+                logger.info(f"[STRIPE] Removido item adicional de sub {existing_sub.stripe_subscription_id}")
+                return {"action": "removed", "extra_qty": 0}
+            return {"action": "noop", "extra_qty": 0}
+
+        if addon_item:
+            current_qty = int(self._get_sub_field(addon_item, "quantity") or 0)
+            if current_qty == extra_qty:
+                return {"action": "noop", "extra_qty": extra_qty}
+            stripe.SubscriptionItem.modify(
+                self._get_sub_field(addon_item, "id"),
+                quantity=extra_qty,
+                proration_behavior="always_invoice",
+            )
+            logger.info(f"[STRIPE] Quantity actualizada {current_qty}→{extra_qty}")
+            return {"action": "updated", "from": current_qty, "to": extra_qty}
+        else:
+            # Agregar nuevo item al sub existente
+            stripe.SubscriptionItem.create(
+                subscription=existing_sub.stripe_subscription_id,
+                price=addon_price_id,
+                quantity=extra_qty,
+                proration_behavior="always_invoice",
+            )
+            logger.info(f"[STRIPE] Item adicional agregado: qty={extra_qty}")
+            return {"action": "added", "extra_qty": extra_qty}
+
     # ─── Subscriptions ───────────────────────────────────────
 
     def _get_sub_field(self, sub: any, field: str, default=None):
@@ -276,6 +423,15 @@ class StripeBillingService:
             stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
             items = self._get_sub_field(stripe_sub_obj, "items")
             item_data = items.get("data", []) if items else []
+
+            # Filtrar el item base (no addon) — el item del plan principal
+            base_items = []
+            for it in item_data:
+                price = self._get_sub_field(it, "price") or {}
+                price_meta = self._get_sub_field(price, "metadata") or {}
+                if price_meta.get("kind") != "additional_store":
+                    base_items.append(it)
+            item_data = base_items
 
             if not item_data:
                 # Fallback: cancelar y crear nueva
@@ -391,6 +547,11 @@ class StripeBillingService:
 
                 await self.db.flush()
                 await self.db.refresh(existing_sub)
+                # Sincronizar item adicional con el nuevo plan (puede tener distinto addon price)
+                try:
+                    await self.sync_extra_stores_quantity(organization_id)
+                except Exception as e:
+                    logger.warning(f"[STRIPE] sync_extra_stores_quantity tras upgrade: {e}")
                 return existing_sub
 
         # ── Nueva suscripción (no tenía una activa en Stripe) ──
@@ -405,10 +566,18 @@ class StripeBillingService:
             .values(status="cancelled", updated_at=datetime.now(timezone.utc))
         )
 
+        # Calcular tiendas adicionales facturables (semántica B)
+        extra_qty = await self._count_billable_extra_stores(organization_id, plan)
+        addon_price_id = await self._ensure_additional_store_price(plan)
+
+        sub_items: list[dict] = [{"price": plan.stripe_price_id, "quantity": 1}]
+        if addon_price_id and extra_qty > 0:
+            sub_items.append({"price": addon_price_id, "quantity": extra_qty})
+
         # Crear suscripción en Stripe
         sub = stripe.Subscription.create(
             customer=sc.stripe_customer_id,
-            items=[{"price": plan.stripe_price_id}],
+            items=sub_items,
             default_payment_method=default_pm,
             payment_behavior="error_if_incomplete",
         )
