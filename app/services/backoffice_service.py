@@ -1024,7 +1024,31 @@ class BackofficeService:
         commission_map = await self._get_commission_map()
         from datetime import timedelta
 
-        # Orgs con suscripción
+        # Subquery: solo la suscripción más reciente por organización (activa preferida)
+        latest_sub_subq = (
+            select(
+                OrganizationSubscription.id,
+                OrganizationSubscription.organization_id,
+                OrganizationSubscription.plan_id,
+                OrganizationSubscription.status,
+                func.row_number()
+                .over(
+                    partition_by=OrganizationSubscription.organization_id,
+                    order_by=(
+                        (OrganizationSubscription.status == "active").desc(),
+                        (OrganizationSubscription.status == "trial").desc(),
+                        OrganizationSubscription.created_at.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .subquery()
+        )
+        latest_sub = (
+            select(latest_sub_subq).where(latest_sub_subq.c.rn == 1).subquery()
+        )
+
+        # Orgs con suscripción (única fila por org)
         base = (
             select(
                 Organization.id,
@@ -1033,12 +1057,12 @@ class BackofficeService:
                 Plan.name.label("plan_name"),
                 Plan.price_monthly,
                 Plan.features,
-                OrganizationSubscription.status.label("subscription_status"),
+                latest_sub.c.status.label("subscription_status"),
             )
             .outerjoin(User, (User.organization_id == Organization.id) & User.is_owner.is_(True))
             .outerjoin(Person, Person.id == User.person_id)
-            .outerjoin(OrganizationSubscription, OrganizationSubscription.organization_id == Organization.id)
-            .outerjoin(Plan, Plan.id == OrganizationSubscription.plan_id)
+            .outerjoin(latest_sub, latest_sub.c.organization_id == Organization.id)
+            .outerjoin(Plan, Plan.id == latest_sub.c.plan_id)
         )
 
         if search:
