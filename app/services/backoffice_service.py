@@ -646,16 +646,19 @@ class BackofficeService:
         )).scalar() or 0
 
         # ── Totales globales: sumamos sobre TODAS las ventas (no paginadas) ──
-        # Traemos id, total y pagos en una sola query con outerjoin
+        # Traemos id, store, total y pagos en una sola query con outerjoin
         all_sales_result = await db.execute(
             select(
                 Sale.id,
+                Sale.store_id,
+                Store.name.label("store_name"),
                 Sale.total,
                 Payment.method,
                 Payment.amount,
                 Payment.terminal,
                 Payment.platform,
             )
+            .join(Store, Store.id == Sale.store_id)
             .outerjoin(Payment, Payment.sale_id == Sale.id)
             .where(*filters)
         )
@@ -665,7 +668,12 @@ class BackofficeService:
         for row in all_sales_result.all():
             sid = str(row.id)
             if sid not in sales_payments:
-                sales_payments[sid] = {"total": float(row.total or 0), "payments": []}
+                sales_payments[sid] = {
+                    "store_id": str(row.store_id),
+                    "store_name": row.store_name,
+                    "total": float(row.total or 0),
+                    "payments": [],
+                }
             if row.method:
                 sales_payments[sid]["payments"].append({
                     "method": row.method,
@@ -677,6 +685,9 @@ class BackofficeService:
         total_revenue = 0.0
         total_solara = 0.0
         total_proc = 0.0
+        # Acumulador por tienda
+        by_store: dict[str, dict] = {}
+
         for sid, sdata in sales_payments.items():
             amount = sdata["total"]
             payments = sdata["payments"]
@@ -695,9 +706,47 @@ class BackofficeService:
                     card_amount = card_total
 
             solara_comm, proc_comm = self._calc_commissions(amount, pay_method, commission_map, card_amount, terminal_val)
+            net = amount - solara_comm - proc_comm
             total_revenue += amount
             total_solara += solara_comm
             total_proc += proc_comm
+
+            # Acumular por tienda
+            store_key = sdata["store_id"]
+            if store_key not in by_store:
+                by_store[store_key] = {
+                    "store_id": store_key,
+                    "store_name": sdata["store_name"],
+                    "sales_count": 0,
+                    "revenue": 0.0,
+                    "solara_commission": 0.0,
+                    "processor_commission": 0.0,
+                    "net_revenue": 0.0,
+                }
+            bs = by_store[store_key]
+            bs["sales_count"] += 1
+            bs["revenue"] += amount
+            bs["solara_commission"] += solara_comm
+            bs["processor_commission"] += proc_comm
+            bs["net_revenue"] += net
+
+        # Lista ordenada por revenue desc
+        by_store_list = sorted(
+            [
+                {
+                    "store_id": v["store_id"],
+                    "store_name": v["store_name"],
+                    "sales_count": v["sales_count"],
+                    "revenue": round(v["revenue"], 2),
+                    "solara_commission": round(v["solara_commission"], 2),
+                    "processor_commission": round(v["processor_commission"], 2),
+                    "net_revenue": round(v["net_revenue"], 2),
+                }
+                for v in by_store.values()
+            ],
+            key=lambda x: x["revenue"],
+            reverse=True,
+        )
 
         # ── Items paginados (solo para la tabla visible) ──
         result = await db.execute(
@@ -771,6 +820,7 @@ class BackofficeService:
             "total_solara_commission": round(total_solara, 2),
             "total_processor_commission": round(total_proc, 2),
             "total_net_revenue": round(total_revenue - total_solara - total_proc, 2),
+            "by_store": by_store_list,
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size,
