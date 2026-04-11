@@ -621,7 +621,11 @@ class BackofficeService:
         self, org_id: uuid.UUID, page: int = 1, page_size: int = 20,
         date_from: str | None = None, date_to: str | None = None,
     ) -> dict:
-        """Ventas de una organización con comisiones calculadas."""
+        """Ventas de una organización con comisiones calculadas.
+
+        Los totales (revenue, comisiones, neto) son sobre TODAS las ventas
+        filtradas, no solo las de la página actual.
+        """
         db = self.db
         commission_map = await self._get_commission_map()
 
@@ -636,12 +640,66 @@ class BackofficeService:
         if date_to:
             filters.append(Sale.created_at <= date_to)
 
-        # Count
+        # Count total
         total = (await db.execute(
             select(func.count(Sale.id)).where(*filters)
         )).scalar() or 0
 
-        # Datos
+        # ── Totales globales: sumamos sobre TODAS las ventas (no paginadas) ──
+        # Traemos id, total y pagos en una sola query con outerjoin
+        all_sales_result = await db.execute(
+            select(
+                Sale.id,
+                Sale.total,
+                Payment.method,
+                Payment.amount,
+                Payment.terminal,
+                Payment.platform,
+            )
+            .outerjoin(Payment, Payment.sale_id == Sale.id)
+            .where(*filters)
+        )
+
+        # Agrupamos pagos por sale_id
+        sales_payments: dict[str, dict] = {}
+        for row in all_sales_result.all():
+            sid = str(row.id)
+            if sid not in sales_payments:
+                sales_payments[sid] = {"total": float(row.total or 0), "payments": []}
+            if row.method:
+                sales_payments[sid]["payments"].append({
+                    "method": row.method,
+                    "amount": float(row.amount or 0),
+                    "terminal": row.terminal,
+                    "platform": row.platform,
+                })
+
+        total_revenue = 0.0
+        total_solara = 0.0
+        total_proc = 0.0
+        for sid, sdata in sales_payments.items():
+            amount = sdata["total"]
+            payments = sdata["payments"]
+
+            pay_method = payments[0]["method"] if payments else None
+            card_amount = None
+            terminal_val = None
+            for p in payments:
+                if p["method"] in ("card", "tarjeta") and p["terminal"]:
+                    terminal_val = p["terminal"]
+                    break
+            if len(payments) > 1:
+                card_total = sum(p["amount"] for p in payments if p["method"] in ("card", "tarjeta"))
+                if card_total > 0:
+                    pay_method = "mixed"
+                    card_amount = card_total
+
+            solara_comm, proc_comm = self._calc_commissions(amount, pay_method, commission_map, card_amount, terminal_val)
+            total_revenue += amount
+            total_solara += solara_comm
+            total_proc += proc_comm
+
+        # ── Items paginados (solo para la tabla visible) ──
         result = await db.execute(
             select(
                 Sale.id, Sale.sale_number, Sale.total, Sale.status, Sale.created_at,
@@ -658,39 +716,30 @@ class BackofficeService:
         )
 
         items = []
-        total_revenue = 0.0
-        total_solara = 0.0
-        total_proc = 0.0
-
         for row in result.all():
             amount = float(row.total or 0)
 
-            # Obtener TODOS los pagos de esta venta para detectar mixtas
             pay_result = await db.execute(
                 select(Payment.method, Payment.amount, Payment.terminal, Payment.platform).where(Payment.sale_id == row.id)
             )
             payments = pay_result.all()
 
-            # Determinar método y monto con tarjeta
             pay_method = payments[0].method if payments else None
             card_amount = None
             terminal_val = None
             platform_val = None
 
             if payments:
-                # Get terminal from first card payment
                 for p in payments:
                     if p.method in ("card", "tarjeta") and p.terminal:
                         terminal_val = p.terminal
                         break
-                # Get platform name from first platform payment
                 for p in payments:
                     if p.method == "platform" and p.platform:
                         platform_val = p.platform
                         break
 
             if len(payments) > 1:
-                # Venta mixta: sumar solo lo pagado con tarjeta
                 card_total = sum(float(p.amount) for p in payments if p.method in ("card", "tarjeta"))
                 if card_total > 0:
                     pay_method = "mixed"
@@ -714,9 +763,6 @@ class BackofficeService:
                 "status": row.status,
                 "created_at": row.created_at,
             })
-            total_revenue += amount
-            total_solara += solara_comm
-            total_proc += proc_comm
 
         return {
             "items": items,
