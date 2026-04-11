@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.dependencies import get_current_user, get_db
 from app.models.ai import AiDailyUsage
+from app.models.backoffice import AiUsageDaily
 from app.models.subscription import OrganizationSubscription
 from app.models.user import User
 from app.schemas.ai import AskRequest, AskResponse
@@ -55,6 +56,54 @@ def get_ai_engine() -> OptimizedAIEngine:
         )
 
     return get_ai_engine._instance
+
+
+async def _record_ai_usage_detailed(
+    db: AsyncSession,
+    user: User,
+    store_id: str | None,
+    tokens_input: int,
+    tokens_output: int,
+    cost_usd: float,
+) -> None:
+    """Registra el uso de IA con tokens y costo en ai_usage_daily (lectura del backoffice).
+    Hace upsert por (store_id, user_id, date)."""
+    if not store_id:
+        store_id = str(user.default_store_id) if user.default_store_id else None
+    if not store_id:
+        return  # No podemos registrar sin store_id
+
+    today = date.today()
+    try:
+        result = await db.execute(
+            select(AiUsageDaily).where(
+                AiUsageDaily.store_id == store_id,
+                AiUsageDaily.user_id == user.id,
+                AiUsageDaily.date == today,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.query_count = (row.query_count or 0) + 1
+            row.tokens_input = (row.tokens_input or 0) + int(tokens_input or 0)
+            row.tokens_output = (row.tokens_output or 0) + int(tokens_output or 0)
+            row.estimated_cost = float(row.estimated_cost or 0) + float(cost_usd or 0)
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            row = AiUsageDaily(
+                store_id=store_id,
+                organization_id=user.organization_id,
+                user_id=user.id,
+                date=today,
+                query_count=1,
+                tokens_input=int(tokens_input or 0),
+                tokens_output=int(tokens_output or 0),
+                estimated_cost=float(cost_usd or 0),
+            )
+            db.add(row)
+        await db.flush()
+    except Exception as e:
+        logger.warning(f"[AI/ASK] No se pudo registrar uso detallado en ai_usage_daily: {e}")
 
 
 async def _check_and_increment_ai_usage(db: AsyncSession, user: User) -> tuple[int, int]:
@@ -169,10 +218,30 @@ async def ask(
         )
 
         ai_history = result.get("ai_history") or {}
-        response.headers["X-AI-Tokens"] = str(ai_history.get("tokens_used", 0))
-        response.headers["X-AI-Cost-USD"] = str(ai_history.get("cost_usd", 0))
+        tokens_used = int(ai_history.get("tokens_used", 0) or 0)
+        tokens_input_val = int(ai_history.get("tokens_input", 0) or 0)
+        tokens_output_val = int(ai_history.get("tokens_output", 0) or 0)
+        # Si solo hay tokens_used (total), repartirlo aproximadamente
+        if tokens_used > 0 and tokens_input_val == 0 and tokens_output_val == 0:
+            tokens_input_val = tokens_used // 2
+            tokens_output_val = tokens_used - tokens_input_val
+        cost_usd_val = float(ai_history.get("cost_usd", 0) or 0)
+
+        response.headers["X-AI-Tokens"] = str(tokens_used)
+        response.headers["X-AI-Cost-USD"] = str(cost_usd_val)
         response.headers["X-AI-Latency"] = str(ai_history.get("latency_seconds", 0))
         response.headers["X-AI-Intent"] = str(ai_history.get("intent", "unknown"))
+
+        # Registrar uso detallado en ai_usage_daily (lectura del backoffice)
+        await _record_ai_usage_detailed(
+            db,
+            current_user,
+            body.store_id,
+            tokens_input_val,
+            tokens_output_val,
+            cost_usd_val,
+        )
+        await db.commit()
 
         # Pipeline de dos bloques de audio
         if opener_task and result.get("analysis"):
