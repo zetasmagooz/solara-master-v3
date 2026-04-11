@@ -49,6 +49,14 @@
 - **DB**: solara_dev (PostgreSQL 16, 127.0.0.1:5432)
 - **Ruta VPS**: `/root/solarax-backend-dev/` (WorkingDirectory del servicio)
 - **Deploy**: `rsync` a `/root/solarax-backend-dev/` excluyendo `.venv/`, `venv/`, `__pycache__/`, `.env`, `*.log`, `.git/` + `sudo systemctl restart solara-dev`
+- **IMPORTANTE**: SIEMPRE rsync del **directorio completo** (`./`), nunca archivos sueltos. Cuando un cambio toca varios archivos relacionados (ej: endpoint + service), hacer rsync individual deja el VPS en estado inconsistente y rompe el backend. Comando exacto:
+  ```bash
+  cd /Users/manaurimaldonado/Desktop/solara-kyosk/solara-backend && \
+  rsync -avz --exclude='.venv/' --exclude='venv/' --exclude='__pycache__/' --exclude='.env' --exclude='*.log' --exclude='.git/' --exclude='uploads/' \
+    -e "sshpass -p 'UJP3grMU' ssh" \
+    ./ root@66.179.92.115:/root/solarax-backend-dev/ && \
+  sshpass -p 'UJP3grMU' ssh root@66.179.92.115 "sudo systemctl restart solara-dev"
+  ```
 
 ## Motor IA
 - **Endpoint**: `/ai/ask`
