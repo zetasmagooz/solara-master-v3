@@ -214,6 +214,7 @@ class BackofficeService:
             .limit(page_size)
         )
 
+        today = datetime.now(timezone.utc).date()
         items = []
         for row in rows.all():
             # Contar stores y users
@@ -222,6 +223,16 @@ class BackofficeService:
             )).scalar() or 0
             user_count = (await db.execute(
                 select(func.count(User.id)).where(User.organization_id == row.id)
+            )).scalar() or 0
+
+            # Total IA por organización: hoy y acumulado
+            ai_today = (await db.execute(
+                select(func.coalesce(func.sum(AiUsageDaily.query_count), 0))
+                .where(AiUsageDaily.organization_id == row.id, AiUsageDaily.date == today)
+            )).scalar() or 0
+            ai_total = (await db.execute(
+                select(func.coalesce(func.sum(AiUsageDaily.query_count), 0))
+                .where(AiUsageDaily.organization_id == row.id)
             )).scalar() or 0
 
             items.append({
@@ -235,6 +246,8 @@ class BackofficeService:
                 "subscription_status": row.subscription_status,
                 "is_blocked": False,  # TODO: check actual blocked status
                 "created_at": row.created_at,
+                "ai_today_queries": int(ai_today),
+                "ai_total_queries": int(ai_total),
             })
 
         return {
@@ -300,6 +313,17 @@ class BackofficeService:
                 "created_at": sub.created_at,
             }
 
+        # IA: total acumulado y total del día (de esta organización)
+        today = datetime.now(timezone.utc).date()
+        ai_today = (await db.execute(
+            select(func.coalesce(func.sum(AiUsageDaily.query_count), 0))
+            .where(AiUsageDaily.organization_id == org_id, AiUsageDaily.date == today)
+        )).scalar() or 0
+        ai_total = (await db.execute(
+            select(func.coalesce(func.sum(AiUsageDaily.query_count), 0))
+            .where(AiUsageDaily.organization_id == org_id)
+        )).scalar() or 0
+
         return {
             "id": org.id,
             "name": org.name,
@@ -315,6 +339,8 @@ class BackofficeService:
             "users": users,
             "subscription": subscription,
             "payments": [],
+            "ai_today_queries": int(ai_today),
+            "ai_total_queries": int(ai_total),
         }
 
     # ── Planes ───────────────────────────────────────────
