@@ -232,11 +232,12 @@ async def get_org_sales(
     page_size: int = Query(default=20, ge=1, le=100),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
+    store_id: str | None = Query(default=None),
     current_user: BowUser = Depends(get_current_bow_user),
     service: BackofficeService = Depends(_get_service),
 ):
-    """Ventas de una organización con comisiones calculadas."""
-    return await service.get_org_sales(org_id, page, page_size, date_from, date_to)
+    """Ventas de una organización con comisiones calculadas. Opcionalmente filtrable por tienda."""
+    return await service.get_org_sales(org_id, page, page_size, date_from, date_to, store_id)
 
 
 # ── Billing por Organización ────────────────────────────

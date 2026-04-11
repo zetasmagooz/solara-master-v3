@@ -620,11 +620,16 @@ class BackofficeService:
     async def get_org_sales(
         self, org_id: uuid.UUID, page: int = 1, page_size: int = 20,
         date_from: str | None = None, date_to: str | None = None,
+        store_id: str | None = None,
     ) -> dict:
         """Ventas de una organización con comisiones calculadas.
 
         Los totales (revenue, comisiones, neto) son sobre TODAS las ventas
         filtradas, no solo las de la página actual.
+
+        Si se pasa store_id, filtra solo las ventas de esa tienda. El breakdown
+        by_store siempre se calcula sobre TODAS las tiendas de la organización
+        (sin aplicar el filtro store_id) para que el dashboard se mantenga.
         """
         db = self.db
         commission_map = await self._get_commission_map()
@@ -632,13 +637,21 @@ class BackofficeService:
         # Base: sales de stores de esta org
         store_ids_q = select(Store.id).where(Store.organization_id == org_id)
 
-        # Filtros
+        # Filtros base (sin store_id) — usados para by_store
         base_filter = Sale.store_id.in_(store_ids_q)
-        filters = [base_filter, Sale.status != "cancelled"]
+        base_filters = [base_filter, Sale.status != "cancelled"]
         if date_from:
-            filters.append(Sale.created_at >= date_from)
+            base_filters.append(Sale.created_at >= date_from)
         if date_to:
-            filters.append(Sale.created_at <= date_to)
+            base_filters.append(Sale.created_at <= date_to)
+
+        # Filtros con store_id (para items y KPIs visibles)
+        filters = list(base_filters)
+        if store_id:
+            try:
+                filters.append(Sale.store_id == uuid.UUID(store_id))
+            except (ValueError, TypeError):
+                pass
 
         # Count total
         total = (await db.execute(
@@ -646,7 +659,8 @@ class BackofficeService:
         )).scalar() or 0
 
         # ── Totales globales: sumamos sobre TODAS las ventas (no paginadas) ──
-        # Traemos id, store, total y pagos en una sola query con outerjoin
+        # Usamos base_filters (sin store_id) para construir by_store sobre todas
+        # las tiendas, y luego derivamos totales aplicando store_id si corresponde.
         all_sales_result = await db.execute(
             select(
                 Sale.id,
@@ -660,7 +674,7 @@ class BackofficeService:
             )
             .join(Store, Store.id == Sale.store_id)
             .outerjoin(Payment, Payment.sale_id == Sale.id)
-            .where(*filters)
+            .where(*base_filters)
         )
 
         # Agrupamos pagos por sale_id
@@ -685,7 +699,6 @@ class BackofficeService:
         total_revenue = 0.0
         total_solara = 0.0
         total_proc = 0.0
-        # Acumulador por tienda
         by_store: dict[str, dict] = {}
 
         for sid, sdata in sales_payments.items():
@@ -707,11 +720,14 @@ class BackofficeService:
 
             solara_comm, proc_comm = self._calc_commissions(amount, pay_method, commission_map, card_amount, terminal_val)
             net = amount - solara_comm - proc_comm
-            total_revenue += amount
-            total_solara += solara_comm
-            total_proc += proc_comm
 
-            # Acumular por tienda
+            # Solo sumar a totales globales si la venta pasa el filtro store_id
+            if not store_id or sdata["store_id"] == store_id:
+                total_revenue += amount
+                total_solara += solara_comm
+                total_proc += proc_comm
+
+            # by_store siempre incluye todas las tiendas (sin filtro)
             store_key = sdata["store_id"]
             if store_key not in by_store:
                 by_store[store_key] = {
