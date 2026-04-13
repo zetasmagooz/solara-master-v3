@@ -14,6 +14,7 @@ from app.models.store import BusinessType, Store
 from app.models.user import User
 from app.schemas.auth import (
     BusinessTypeResponse,
+    DeleteAccountRequest,
     LoginRequest,
     RefreshTokenRequest,
     RegisterRequest,
@@ -265,6 +266,22 @@ async def logout(
         except (ValueError, Exception):
             pass
     return {"status": "ok", "message": "Logged out"}
+
+
+@router.delete("/account")
+async def delete_account(
+    data: DeleteAccountRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Eliminar la cuenta del usuario autenticado (soft-delete). Requiere contraseña."""
+    service = AuthService(db)
+    try:
+        await service.delete_account(current_user, data.password)
+        await db.commit()
+        return {"status": "ok", "message": "Cuenta eliminada"}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/business-types", response_model=list[BusinessTypeResponse])

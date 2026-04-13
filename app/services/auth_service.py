@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.auth import Session as SessionModel
 from app.models.organization import Organization
 from app.models.store import Currency, Country, Store, StoreConfig
 from app.models.user import Password, Person, PersonPhone, User, UserRolePermission
@@ -240,3 +241,29 @@ class AuthService:
         user = result.scalar_one()
 
         return await self.create_tokens(user, trial_ends_at=store.trial_ends_at)
+
+    async def delete_account(self, user: User, password: str) -> None:
+        """Soft-delete de la cuenta del usuario. Owners no pueden borrar su cuenta."""
+        if user.is_owner:
+            raise ValueError("Los propietarios no pueden eliminar su cuenta. Contacta soporte para transferir o cerrar tu organización.")
+
+        # Verificar contraseña
+        pwd_result = await self.db.execute(
+            select(Password).where(Password.user_id == user.id).order_by(Password.created_at.desc())
+        )
+        pwd = pwd_result.scalar_one_or_none()
+        if not pwd or not verify_password(password, pwd.password_hash):
+            raise ValueError("Contraseña incorrecta")
+
+        # Soft-delete: marcar usuario como eliminado
+        user.is_active = False
+        user.deleted_at = datetime.now(timezone.utc)
+
+        # Cerrar todas las sesiones activas
+        await self.db.execute(
+            update(SessionModel)
+            .where(SessionModel.user_id == user.id, SessionModel.is_active.is_(True))
+            .values(is_active=False, ended_at=datetime.now(timezone.utc), close_reason="account_deleted")
+        )
+
+        await self.db.flush()

@@ -81,3 +81,7 @@ class BusinessTypeResponse(BaseModel):
     icon: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
