@@ -2,6 +2,11 @@
 
 ## 2026-04-13
 
+### chore(plans): Eliminar tienda adicional gratis en Premium y Ultimate
+- Premium: `free_stores 1 → 0`, `max_stores 1 → -1` (ahora permite agregar tiendas adicionales, todas facturables)
+- Ultimate: `free_stores 1 → 0` (todas las adicionales facturables; la principal sigue incluida)
+- Aplicado en `solara_dev` y `solara_prod` vía UPDATE; `app/seeds/seed_plans.py` actualizado para reflejar los nuevos defaults en futuros bootstraps
+
 ### fix: Auditoría de integridad dev/prod + resincronización de sequences
 - Script `scripts/resync_sequences.sql` reusable post-bootstrap para resincronizar todas las secuencias del schema `public` con `MAX(id)` de su tabla (evita violaciones de pkey tras dumps/seeds con ids explícitos)
 - Aplicado a `solara_dev` y `solara_prod`: 16 sequences sincronizadas en cada uno

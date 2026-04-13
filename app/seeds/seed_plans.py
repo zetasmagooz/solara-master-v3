@@ -70,8 +70,8 @@ PLANS = [
             "sales_per_day": -1,
             "max_products": 500,
             "max_users": 7,
-            "max_stores": 1,
-            "free_stores": 1,
+            "max_stores": -1,
+            "free_stores": 0,
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "marcas",
                 "proveedores", "ajustar_inventario", "combos", "insumos",
@@ -88,7 +88,7 @@ PLANS = [
     {
         "slug": "ultimate",
         "name": "Ultimate",
-        "description": "Sin límites — 2 tiendas incluidas, 10 usuarios, 1000 productos",
+        "description": "Sin límites — 1 tienda incluida, 10 usuarios, 1000 productos",
         "price_monthly": 999,
         "sort_order": 4,
         "features": {
@@ -97,7 +97,7 @@ PLANS = [
             "max_products": 1000,
             "max_users": 10,
             "max_stores": -1,
-            "free_stores": 2,
+            "free_stores": 0,
             "modules": [
                 "pos", "ia", "caja", "catalogo", "categorias", "marcas",
                 "proveedores", "ajustar_inventario", "combos", "insumos",
