@@ -1,5 +1,14 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-12
+
+### feat: Extender Plan — endpoint para extender suscripción por días
+- Nuevo endpoint `POST /backoffice/organizations/{org_id}/extend-plan` con `days` (1-730) + `reason`
+- Servicio `extend_plan()`: suma días al `expires_at` de la suscripción activa (si expirada, la reactiva como trial)
+- Si hay suscripción Stripe, extiende el `trial_end` automáticamente
+- Schemas: `BowExtendPlanRequest` / `BowExtendPlanResponse`
+- Audit log incluido
+
 ## 2026-04-11
 
 ### feat: Cobro de tiendas adicionales en Stripe (multi-item subscription)

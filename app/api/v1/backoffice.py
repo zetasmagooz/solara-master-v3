@@ -30,6 +30,8 @@ from app.schemas.backoffice import (
     BowRevenueByPlan,
     BowTrialResponse,
     BowUpdatePlanRequest,
+    BowExtendPlanRequest,
+    BowExtendPlanResponse,
 )
 from app.services.backoffice_service import BackofficeService
 
@@ -398,6 +400,36 @@ async def list_trials(
 ):
     """Historial de trials."""
     return await service.get_org_trials(org_id)
+
+
+# ── Extender Plan ────────────────────────────────────────
+
+
+@router.post("/organizations/{org_id}/extend-plan", response_model=BowExtendPlanResponse)
+async def extend_plan(
+    org_id: uuid.UUID,
+    body: BowExtendPlanRequest,
+    request: Request,
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Extender la suscripción de una organización por X días."""
+    if not body.days and not body.target_date:
+        raise HTTPException(status_code=400, detail="Debe proporcionar 'days' o 'target_date'")
+    try:
+        result = await service.extend_plan(org_id, body.days, body.target_date, body.reason)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await service.log_audit(
+        admin_user_id=current_user.id,
+        action="extend_plan",
+        entity_type="organization",
+        entity_id=org_id,
+        details={"days": body.days, "target_date": str(body.target_date) if body.target_date else None, "reason": body.reason},
+        ip_address=request.client.host if request.client else None,
+    )
+    return result
 
 
 # ── Descuentos ────────────────────────────────────────

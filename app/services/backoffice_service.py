@@ -1378,6 +1378,76 @@ class BackofficeService:
             "created_at": trial.created_at,
         }
 
+    async def extend_plan(
+        self, org_id: uuid.UUID, days: int | None, target_date: datetime | None, reason: str | None,
+    ) -> dict:
+        """Extender o ajustar la suscripción de una organización."""
+        from datetime import timedelta
+        db = self.db
+
+        org = (await db.execute(
+            select(Organization).where(Organization.id == org_id)
+        )).scalar_one_or_none()
+        if not org:
+            raise ValueError("Organización no encontrada")
+
+        sub = (await db.execute(
+            select(OrganizationSubscription)
+            .where(OrganizationSubscription.organization_id == org_id)
+            .order_by(OrganizationSubscription.created_at.desc())
+        )).scalar_one_or_none()
+        if not sub:
+            raise ValueError("No hay suscripción activa para esta organización")
+
+        now = datetime.now(timezone.utc)
+        previous_expires = sub.expires_at
+
+        if target_date:
+            # Modo fecha destino: establecer expires_at directamente
+            if target_date.tzinfo is None:
+                target_date = target_date.replace(tzinfo=timezone.utc)
+            if target_date <= now:
+                raise ValueError("La fecha destino debe ser posterior a la fecha actual")
+            new_expires = target_date
+        else:
+            # Modo días: sumar días a la fecha base
+            base_date = sub.expires_at if sub.expires_at and sub.expires_at > now else now
+            new_expires = base_date + timedelta(days=days)
+
+        days_changed = int((new_expires - (previous_expires or now)).total_seconds() / 86400)
+        sub.expires_at = new_expires
+
+        # Si estaba expirada, reactivar como trial
+        if sub.status == "expired":
+            sub.status = "trial"
+
+        # Si tiene suscripción Stripe, ajustar trial_end
+        try:
+            from app.models.stripe import StripeSubscription
+            stripe_sub = (await db.execute(
+                select(StripeSubscription).where(
+                    StripeSubscription.organization_id == org_id,
+                    StripeSubscription.status.in_(["active", "trialing", "past_due"]),
+                )
+            )).scalar_one_or_none()
+            if stripe_sub and settings.STRIPE_SECRET_KEY:
+                stripe.api_key = settings.STRIPE_SECRET_KEY
+                stripe.Subscription.modify(
+                    stripe_sub.stripe_subscription_id,
+                    trial_end=int(new_expires.timestamp()),
+                )
+        except Exception:
+            pass
+
+        await db.flush()
+        return {
+            "organization_id": org_id,
+            "days_changed": days_changed,
+            "previous_expires_at": previous_expires,
+            "new_expires_at": new_expires,
+            "reason": reason,
+        }
+
     async def revoke_trial(self, org_id: uuid.UUID, admin_user_id: uuid.UUID) -> dict:
         """Revocar trial activo de una organización."""
         db = self.db

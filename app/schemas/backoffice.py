@@ -304,6 +304,22 @@ class BowTrialResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Extender Plan ──────────────────────────────────────
+
+class BowExtendPlanRequest(BaseModel):
+    days: int | None = Field(default=None, ge=1, le=730)
+    target_date: datetime | None = None
+    reason: str | None = None
+
+
+class BowExtendPlanResponse(BaseModel):
+    organization_id: uuid.UUID
+    days_changed: int
+    previous_expires_at: datetime | None = None
+    new_expires_at: datetime
+    reason: str | None = None
+
+
 # ── Descuentos ─────────────────────────────────────────
 
 class BowApplyDiscountRequest(BaseModel):
