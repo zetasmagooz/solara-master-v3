@@ -25,7 +25,7 @@ class WeatherService:
         Si no existe, llama a la API y crea uno nuevo.
         Retorna None si la API falla o no hay coords.
         """
-        if not settings.WEATHER_API_KEY:
+        if not settings.WEATHER_API_KEY or settings.WEATHER_API_KEY in ("CHANGEME", "changeme"):
             return None
 
         try:

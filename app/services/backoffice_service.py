@@ -24,7 +24,7 @@ from app.models.sale import Payment, Sale
 from app.models.stripe import StripeInvoice, StripeSubscription
 from app.models.store import Store
 from app.models.subscription import OrganizationSubscription, Plan
-from app.models.user import Password, Person, User
+from app.models.user import Password, Person, Role, User, UserRolePermission
 
 
 class BackofficeService:
@@ -341,6 +341,120 @@ class BackofficeService:
             "payments": [],
             "ai_today_queries": int(ai_today),
             "ai_total_queries": int(ai_total),
+        }
+
+    async def get_org_users_by_store(self, org_id: uuid.UUID) -> dict | None:
+        """Usuarios de una organización agrupados por tienda con su rol y permisos."""
+        db = self.db
+
+        org = (await db.execute(
+            select(Organization).where(Organization.id == org_id)
+        )).scalar_one_or_none()
+        if not org:
+            return None
+
+        # Tiendas de la organización
+        stores_result = await db.execute(
+            select(Store.id, Store.name)
+            .where(Store.organization_id == org_id)
+            .order_by(Store.name)
+        )
+        stores = stores_result.all()
+
+        # Todos los usuarios de la organización
+        users_result = await db.execute(
+            select(User.id, Person.first_name, Person.last_name, Person.email, User.is_active, User.is_owner)
+            .join(Person, Person.id == User.person_id)
+            .where(User.organization_id == org_id)
+        )
+        all_users = users_result.all()
+
+        # Todas las asignaciones de rol-tienda para usuarios de esta org
+        user_ids = [u.id for u in all_users]
+        store_ids = [s.id for s in stores]
+
+        assignments = []
+        if user_ids and store_ids:
+            assign_result = await db.execute(
+                select(
+                    UserRolePermission.user_id,
+                    UserRolePermission.store_id,
+                    Role.name.label("role_name"),
+                    Role.permissions.label("role_permissions"),
+                    UserRolePermission.permissions.label("custom_permissions"),
+                )
+                .join(Role, Role.id == UserRolePermission.role_id)
+                .where(
+                    UserRolePermission.user_id.in_(user_ids),
+                    UserRolePermission.store_id.in_(store_ids),
+                )
+            )
+            assignments = assign_result.all()
+
+        # Indexar asignaciones: {(user_id, store_id): {role_name, permissions}}
+        assign_map: dict[tuple, dict] = {}
+        for a in assignments:
+            key = (str(a.user_id), str(a.store_id))
+            assign_map[key] = {
+                "role_name": a.role_name,
+                "role_permissions": a.role_permissions or [],
+                "custom_permissions": a.custom_permissions or {},
+            }
+
+        # Indexar usuarios
+        users_map = {
+            str(u.id): {
+                "id": str(u.id),
+                "name": f"{u.first_name} {u.last_name}".strip(),
+                "email": u.email,
+                "is_active": u.is_active,
+                "is_owner": u.is_owner,
+            }
+            for u in all_users
+        }
+
+        # Construir respuesta agrupada por tienda
+        stores_data = []
+        assigned_user_ids = set()
+
+        for store in stores:
+            store_users = []
+            for user in all_users:
+                key = (str(user.id), str(store.id))
+                assignment = assign_map.get(key)
+                if assignment:
+                    assigned_user_ids.add(str(user.id))
+                    store_users.append({
+                        **users_map[str(user.id)],
+                        "role_name": assignment["role_name"],
+                        "role_permissions": assignment["role_permissions"],
+                    })
+                elif user.is_owner:
+                    # Owner siempre aparece en todas las tiendas
+                    assigned_user_ids.add(str(user.id))
+                    store_users.append({
+                        **users_map[str(user.id)],
+                        "role_name": "Propietario",
+                        "role_permissions": ["*"],
+                    })
+
+            stores_data.append({
+                "store_id": str(store.id),
+                "store_name": store.name,
+                "users": store_users,
+            })
+
+        # Usuarios sin asignación de tienda
+        unassigned = [
+            {**users_map[uid], "role_name": None, "role_permissions": []}
+            for uid in users_map
+            if uid not in assigned_user_ids and not users_map[uid]["is_owner"]
+        ]
+
+        return {
+            "stores": stores_data,
+            "unassigned_users": unassigned,
+            "total_users": len(all_users),
         }
 
     # ── Planes ───────────────────────────────────────────

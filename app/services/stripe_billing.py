@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import stripe
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,19 @@ class StripeBillingService:
 
     async def get_or_create_customer(self, organization_id: uuid.UUID) -> StripeCustomer:
         """Obtiene o crea un StripeCustomer para la organización."""
+        result = await self.db.execute(
+            select(StripeCustomer).where(StripeCustomer.organization_id == organization_id)
+        )
+        sc = result.scalar_one_or_none()
+        if sc:
+            return sc
+
+        # Serializar la creación por organización para evitar race condition
+        # (dos requests concurrentes creando dos customers en Stripe).
+        lock_key = uuid.UUID(str(organization_id)).int & 0x7FFFFFFFFFFFFFFF
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": lock_key})
+
+        # Re-check después del lock: otra transacción pudo haberlo creado
         result = await self.db.execute(
             select(StripeCustomer).where(StripeCustomer.organization_id == organization_id)
         )
@@ -142,10 +155,11 @@ class StripeBillingService:
 
         # Obtener el default PM del customer
         customer = stripe.Customer.retrieve(sc.stripe_customer_id)
-        default_pm_id = customer.get("invoice_settings", {}).get("default_payment_method")
+        invoice_settings = getattr(customer, "invoice_settings", None)
+        default_pm_id = getattr(invoice_settings, "default_payment_method", None) if invoice_settings else None
 
         for spm in stripe_pms.data:
-            card = spm.get("card", {})
+            card = getattr(spm, "card", None)
             existing = await self.db.execute(
                 select(StripePaymentMethod).where(StripePaymentMethod.stripe_pm_id == spm.id)
             )
@@ -153,10 +167,10 @@ class StripeBillingService:
                 pm = StripePaymentMethod(
                     stripe_customer_id=sc.id,
                     stripe_pm_id=spm.id,
-                    brand=card.get("brand", "unknown"),
-                    last_four=card.get("last4", "0000"),
-                    exp_month=card.get("exp_month", 0),
-                    exp_year=card.get("exp_year", 0),
+                    brand=getattr(card, "brand", "unknown") if card else "unknown",
+                    last_four=getattr(card, "last4", "0000") if card else "0000",
+                    exp_month=getattr(card, "exp_month", 0) if card else 0,
+                    exp_year=getattr(card, "exp_year", 0) if card else 0,
                     is_default=(spm.id == default_pm_id),
                 )
                 self.db.add(pm)
@@ -241,8 +255,8 @@ class StripeBillingService:
         if plan.stripe_additional_store_price_id:
             try:
                 existing = stripe.Price.retrieve(plan.stripe_additional_store_price_id)
-                existing_amount = (existing.get("unit_amount") or 0) / 100
-                if abs(existing_amount - amount) < 0.01 and existing.get("active"):
+                existing_amount = (self._get_sub_field(existing, "unit_amount") or 0) / 100
+                if abs(existing_amount - amount) < 0.01 and self._get_sub_field(existing, "active"):
                     return plan.stripe_additional_store_price_id
                 # Precio cambió → desactivar el viejo
                 try:
@@ -323,14 +337,14 @@ class StripeBillingService:
         # Si el plan no cobra extras o no hay extras, no hacemos nada (o removemos item si existía)
         stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
         items = self._get_sub_field(stripe_sub_obj, "items")
-        item_data = items.get("data", []) if items else []
+        item_data = self._get_sub_field(items, "data", []) if items else []
 
         # Buscar el item adicional existente (si lo hay)
         addon_item = None
         for it in item_data:
             price = self._get_sub_field(it, "price") or {}
             price_meta = self._get_sub_field(price, "metadata") or {}
-            if price_meta.get("kind") == "additional_store":
+            if self._get_sub_field(price_meta, "kind") == "additional_store":
                 addon_item = it
                 break
 
@@ -422,14 +436,14 @@ class StripeBillingService:
 
             stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
             items = self._get_sub_field(stripe_sub_obj, "items")
-            item_data = items.get("data", []) if items else []
+            item_data = self._get_sub_field(items, "data", []) if items else []
 
             # Filtrar el item base (no addon) — el item del plan principal
             base_items = []
             for it in item_data:
                 price = self._get_sub_field(it, "price") or {}
                 price_meta = self._get_sub_field(price, "metadata") or {}
-                if price_meta.get("kind") != "additional_store":
+                if self._get_sub_field(price_meta, "kind") != "additional_store":
                     base_items.append(it)
             item_data = base_items
 
@@ -637,9 +651,9 @@ class StripeBillingService:
 
     # ─── Webhook Handlers ────────────────────────────────────
 
-    async def handle_invoice_paid(self, stripe_invoice: dict) -> None:
+    async def handle_invoice_paid(self, stripe_invoice) -> None:
         """Procesa invoice.payment_succeeded — registra factura y actualiza fechas de suscripción."""
-        stripe_sub_id = stripe_invoice.get("subscription")
+        stripe_sub_id = self._get_sub_field(stripe_invoice, "subscription")
         if not stripe_sub_id:
             return
 
@@ -655,20 +669,21 @@ class StripeBillingService:
             stripe_subscription_id=sub.id,
             stripe_invoice_id=stripe_invoice["id"],
             amount=stripe_invoice["amount_paid"] / 100,  # Stripe usa centavos
-            currency=stripe_invoice.get("currency", "mxn"),
+            currency=self._get_sub_field(stripe_invoice, "currency", "mxn"),
             status="paid",
-            invoice_url=stripe_invoice.get("hosted_invoice_url"),
+            invoice_url=self._get_sub_field(stripe_invoice, "hosted_invoice_url"),
             paid_at=datetime.now(timezone.utc),
         )
         self.db.add(invoice)
 
         # Actualizar fechas del periodo en StripeSubscription
-        lines = stripe_invoice.get("lines", {}).get("data", [])
-        if lines:
-            line = lines[0].get("period", {})
-            if line.get("start"):
+        lines_obj = self._get_sub_field(stripe_invoice, "lines")
+        lines_data = self._get_sub_field(lines_obj, "data", []) if lines_obj else []
+        if lines_data:
+            line = self._get_sub_field(lines_data[0], "period")
+            if line and self._get_sub_field(line, "start"):
                 sub.current_period_start = datetime.fromtimestamp(line["start"], tz=timezone.utc)
-            if line.get("end"):
+            if line and self._get_sub_field(line, "end"):
                 sub.current_period_end = datetime.fromtimestamp(line["end"], tz=timezone.utc)
 
         sub.status = "active"
@@ -687,9 +702,9 @@ class StripeBillingService:
 
         await self.db.flush()
 
-    async def handle_invoice_failed(self, stripe_invoice: dict) -> None:
+    async def handle_invoice_failed(self, stripe_invoice) -> None:
         """Procesa invoice.payment_failed."""
-        stripe_sub_id = stripe_invoice.get("subscription")
+        stripe_sub_id = self._get_sub_field(stripe_invoice, "subscription")
         if not stripe_sub_id:
             return
 
@@ -704,14 +719,14 @@ class StripeBillingService:
             stripe_subscription_id=sub.id,
             stripe_invoice_id=stripe_invoice["id"],
             amount=stripe_invoice["amount_due"] / 100,
-            currency=stripe_invoice.get("currency", "mxn"),
+            currency=self._get_sub_field(stripe_invoice, "currency", "mxn"),
             status="failed",
-            invoice_url=stripe_invoice.get("hosted_invoice_url"),
+            invoice_url=self._get_sub_field(stripe_invoice, "hosted_invoice_url"),
         )
         self.db.add(invoice)
         await self.db.flush()
 
-    async def handle_subscription_updated(self, stripe_sub: dict) -> None:
+    async def handle_subscription_updated(self, stripe_sub) -> None:
         """Procesa customer.subscription.updated — sincroniza estado, fechas y downgrades."""
         result = await self.db.execute(
             select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])
@@ -721,15 +736,16 @@ class StripeBillingService:
             return
 
         sub.status = stripe_sub["status"]
-        sub.cancel_at_period_end = stripe_sub.get("cancel_at_period_end", False)
-        if stripe_sub.get("current_period_start"):
+        sub.cancel_at_period_end = self._get_sub_field(stripe_sub, "cancel_at_period_end", False)
+        if self._get_sub_field(stripe_sub, "current_period_start"):
             sub.current_period_start = datetime.fromtimestamp(stripe_sub["current_period_start"], tz=timezone.utc)
-        if stripe_sub.get("current_period_end"):
+        if self._get_sub_field(stripe_sub, "current_period_end"):
             sub.current_period_end = datetime.fromtimestamp(stripe_sub["current_period_end"], tz=timezone.utc)
 
         # Detectar cambio de precio (upgrade/downgrade aplicado por Stripe al renovar)
-        items = stripe_sub.get("items", {}).get("data", [])
-        current_stripe_price = items[0]["price"]["id"] if items else None
+        items_obj = self._get_sub_field(stripe_sub, "items")
+        items_data = self._get_sub_field(items_obj, "data", []) if items_obj else []
+        current_stripe_price = items_data[0]["price"]["id"] if items_data else None
         price_changed = current_stripe_price and current_stripe_price != sub.stripe_price_id
 
         if price_changed:
@@ -756,8 +772,8 @@ class StripeBillingService:
                     org_sub.updated_at = datetime.now(timezone.utc)
 
                 # Limpiar metadata de downgrade pendiente
-                metadata = stripe_sub.get("metadata", {})
-                if metadata.get("pending_downgrade"):
+                metadata = self._get_sub_field(stripe_sub, "metadata") or {}
+                if self._get_sub_field(metadata, "pending_downgrade"):
                     try:
                         stripe.Subscription.modify(
                             stripe_sub["id"],
@@ -784,7 +800,7 @@ class StripeBillingService:
 
         await self.db.flush()
 
-    async def handle_subscription_deleted(self, stripe_sub: dict) -> None:
+    async def handle_subscription_deleted(self, stripe_sub) -> None:
         """Procesa customer.subscription.deleted — marcar como expired, usuario debe re-suscribirse."""
         result = await self.db.execute(
             select(StripeSubscription).where(StripeSubscription.stripe_subscription_id == stripe_sub["id"])

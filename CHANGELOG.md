@@ -1,5 +1,28 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-13
+
+### fix: Auditoría de integridad dev/prod + resincronización de sequences
+- Script `scripts/resync_sequences.sql` reusable post-bootstrap para resincronizar todas las secuencias del schema `public` con `MAX(id)` de su tabla (evita violaciones de pkey tras dumps/seeds con ids explícitos)
+- Aplicado a `solara_dev` y `solara_prod`: 16 sequences sincronizadas en cada uno
+- Limpieza de 7 filas huérfanas en `user_role_permissions` en prod (referenciaban user_ids y role_ids inexistentes de un dump parcial)
+
+### fix: Guard contra WEATHER_API_KEY placeholder
+- `weather_service.py` detecta `WEATHER_API_KEY in ("CHANGEME", "changeme")` y retorna `None` en lugar de llamar a la API con key inválida (evitaba 401 recurrentes)
+
+### fix: Race condition en `get_or_create_customer`
+- `stripe_billing.py`: `pg_advisory_xact_lock` basado en `organization_id` para serializar la creación, evitando duplicados de `stripe_customers` por doble-click o retries concurrentes
+
+### refactor: Helper `_get_sub_field` para accesos a StripeObject
+- `stripe_billing.py`: los objetos del SDK de Stripe no son dicts y `.get()` se resolvía como atributo → `AttributeError`. Helper y reemplazo de `.get()` por accesos seguros en `sync_payment_methods`, `handle_subscription_updated`, `handle_subscription_deleted`, etc.
+
+### feat: Endpoint `GET /backoffice/organizations/{id}/users-by-store`
+- Retorna usuarios de una organización agrupados por tienda con rol y permisos
+- Incluye owners en todas las tiendas y lista separada de `unassigned_users`
+
+### chore: Dependencias
+- Añadido `python-dateutil==2.9.0.post0` a `requirements.txt` (usado en `backoffice_service.grant_trial` y `extend_plan`)
+
 ## 2026-04-12
 
 ### feat: Extender Plan — endpoint para extender suscripción por días

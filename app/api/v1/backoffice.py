@@ -101,6 +101,22 @@ async def get_organization_detail(
     return detail
 
 
+# ── Usuarios por Tienda ─────────────────────────────────
+
+
+@router.get("/organizations/{org_id}/users-by-store")
+async def get_org_users_by_store(
+    org_id: uuid.UUID,
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Usuarios de una organización agrupados por tienda con roles y permisos."""
+    result = await service.get_org_users_by_store(org_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organización no encontrada")
+    return result
+
+
 # ── Planes ───────────────────────────────────────────────
 
 
