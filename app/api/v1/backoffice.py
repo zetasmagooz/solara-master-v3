@@ -524,6 +524,24 @@ async def get_promotions(
     return await service.get_org_active_promotions(org_id)
 
 
+# ── Payment Summary por Organización ──────────────────
+
+
+@router.get("/organizations/{org_id}/payment-summary")
+async def get_org_payment_summary(
+    org_id: uuid.UUID,
+    date_from: str | None = Query(default=None, description="Fecha inicio YYYY-MM-DD"),
+    date_to: str | None = Query(default=None, description="Fecha fin YYYY-MM-DD"),
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Resumen de métodos de pago de una organización (todas sus tiendas)."""
+    result = await service.get_org_payment_summary(org_id, date_from, date_to)
+    if not result:
+        raise HTTPException(status_code=404, detail="Organización no encontrada o sin tiendas")
+    return result
+
+
 # ── Pagos / Facturas ────────────────────────────────
 
 

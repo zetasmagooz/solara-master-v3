@@ -1934,3 +1934,160 @@ class BackofficeService:
             ip_address=ip_address,
         )
         self.db.add(log)
+
+    # ── Payment Summary por Organización ─────────────────
+
+    async def get_org_payment_summary(
+        self,
+        org_id: uuid.UUID,
+        date_from: str | None = None,
+        date_to: str | None = None,
+    ) -> dict:
+        """Resumen de métodos de pago de una organización (todas sus tiendas).
+
+        Retorna totales y conteos por método (cash, card, transfer, platform, mixed)
+        y desglose por tienda.
+        """
+        db = self.db
+
+        store_ids_q = select(Store.id).where(Store.organization_id == org_id)
+
+        # Verificar que la org tiene tiendas
+        store_check = await db.execute(
+            select(func.count()).select_from(Store).where(Store.organization_id == org_id)
+        )
+        if (store_check.scalar() or 0) == 0:
+            return None
+
+        # Base filters
+        filters = [
+            Sale.store_id.in_(store_ids_q),
+            Sale.status != "cancelled",
+        ]
+        if date_from:
+            filters.append(
+                func.date(func.timezone("America/Mexico_City", Sale.created_at)) >= date_from
+            )
+        if date_to:
+            filters.append(
+                func.date(func.timezone("America/Mexico_City", Sale.created_at)) <= date_to
+            )
+
+        # Traer todas las ventas con sus pagos
+        result = await db.execute(
+            select(
+                Sale.id,
+                Sale.store_id,
+                Store.name.label("store_name"),
+                Sale.total,
+                Payment.method,
+                Payment.amount,
+                Payment.terminal,
+            )
+            .join(Store, Store.id == Sale.store_id)
+            .outerjoin(Payment, Payment.sale_id == Sale.id)
+            .where(*filters)
+        )
+
+        # Agrupar pagos por sale_id
+        sales_map: dict[str, dict] = {}
+        for row in result.all():
+            sid = str(row.id)
+            if sid not in sales_map:
+                sales_map[sid] = {
+                    "store_id": str(row.store_id),
+                    "store_name": row.store_name,
+                    "total": float(row.total or 0),
+                    "methods": set(),
+                    "payments": [],
+                }
+            if row.method:
+                sales_map[sid]["methods"].add(row.method)
+                sales_map[sid]["payments"].append({
+                    "method": row.method,
+                    "amount": float(row.amount or 0),
+                    "terminal": row.terminal,
+                })
+
+        # Clasificar cada venta por su método principal
+        # Si tiene más de un método distinto → mixed
+        totals = {"cash": 0.0, "card": 0.0, "card_normal": 0.0, "card_ecartpay": 0.0,
+                  "transfer": 0.0, "platform": 0.0, "mixed": 0.0}
+        counts = {"cash": 0, "card": 0, "card_normal": 0, "card_ecartpay": 0,
+                  "transfer": 0, "platform": 0, "mixed": 0}
+        total_revenue = 0.0
+        total_transactions = 0
+
+        by_store: dict[str, dict] = {}
+
+        for sid, sdata in sales_map.items():
+            amount = sdata["total"]
+            methods = sdata["methods"]
+            payments = sdata["payments"]
+            total_revenue += amount
+            total_transactions += 1
+
+            # Determinar método principal de la venta
+            if len(methods) > 1:
+                sale_method = "mixed"
+            elif len(methods) == 1:
+                sale_method = next(iter(methods))
+            else:
+                sale_method = "cash"  # fallback si no hay payments
+
+            totals[sale_method] = totals.get(sale_method, 0) + amount
+            counts[sale_method] = counts.get(sale_method, 0) + 1
+
+            # Desglose card normal vs ecartpay
+            for p in payments:
+                if p["method"] == "card":
+                    if p["terminal"] == "ecartpay":
+                        totals["card_ecartpay"] += p["amount"]
+                        counts["card_ecartpay"] += 1
+                    else:
+                        totals["card_normal"] += p["amount"]
+                        counts["card_normal"] += 1
+
+            # Acumular por tienda
+            store_key = sdata["store_id"]
+            if store_key not in by_store:
+                by_store[store_key] = {
+                    "store_id": store_key,
+                    "store_name": sdata["store_name"],
+                    "total_revenue": 0.0,
+                    "total_transactions": 0,
+                    "cash": 0.0, "card": 0.0, "transfer": 0.0,
+                    "platform": 0.0, "mixed": 0.0,
+                    "cash_count": 0, "card_count": 0, "transfer_count": 0,
+                    "platform_count": 0, "mixed_count": 0,
+                }
+            st = by_store[store_key]
+            st["total_revenue"] += amount
+            st["total_transactions"] += 1
+            st[sale_method] = st.get(sale_method, 0) + amount
+            count_key = f"{sale_method}_count"
+            st[count_key] = st.get(count_key, 0) + 1
+
+        return {
+            "total_revenue": total_revenue,
+            "total_transactions": total_transactions,
+            "cash": totals["cash"],
+            "card": totals["card"],
+            "card_normal": totals["card_normal"],
+            "card_ecartpay": totals["card_ecartpay"],
+            "transfer": totals["transfer"],
+            "platform": totals["platform"],
+            "mixed": totals["mixed"],
+            "cash_count": counts["cash"],
+            "card_count": counts["card"],
+            "card_normal_count": counts["card_normal"],
+            "card_ecartpay_count": counts["card_ecartpay"],
+            "transfer_count": counts["transfer"],
+            "platform_count": counts["platform"],
+            "mixed_count": counts["mixed"],
+            "by_store": sorted(
+                by_store.values(),
+                key=lambda x: x["total_revenue"],
+                reverse=True,
+            ),
+        }
