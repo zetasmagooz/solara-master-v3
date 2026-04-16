@@ -243,9 +243,8 @@ class AuthService:
         return await self.create_tokens(user, trial_ends_at=store.trial_ends_at)
 
     async def delete_account(self, user: User, password: str) -> None:
-        """Soft-delete de la cuenta del usuario. Owners no pueden borrar su cuenta."""
-        if user.is_owner:
-            raise ValueError("Los propietarios no pueden eliminar su cuenta. Contacta soporte para transferir o cerrar tu organización.")
+        """Soft-delete de la cuenta del usuario. Si es owner, limpia toda la organización."""
+        from app.models.user import AccountDeletionLog
 
         # Verificar contraseña
         pwd_result = await self.db.execute(
@@ -255,15 +254,128 @@ class AuthService:
         if not pwd or not verify_password(password, pwd.password_hash):
             raise ValueError("Contraseña incorrecta")
 
+        now = datetime.now(timezone.utc)
+        stores_deactivated = 0
+        employees_deactivated = 0
+        subscription_cancelled = False
+        plan_name = None
+        org_id = None
+
+        # Si es owner, limpiar toda la organización
+        if user.is_owner:
+            from app.models.subscription import OrganizationSubscription, Plan
+            from app.models.stripe import StripeSubscription
+            import stripe
+            from app.config import settings
+
+            org_result = await self.db.execute(
+                select(Organization).where(Organization.owner_id == user.id)
+            )
+            org = org_result.scalar_one_or_none()
+
+            if org:
+                org_id = org.id
+
+                # Obtener plan actual para la bitácora
+                sub_result = await self.db.execute(
+                    select(OrganizationSubscription)
+                    .where(
+                        OrganizationSubscription.organization_id == org.id,
+                        OrganizationSubscription.status.in_(["trial", "active"]),
+                    )
+                    .order_by(OrganizationSubscription.created_at.desc())
+                    .limit(1)
+                )
+                current_sub = sub_result.scalar_one_or_none()
+                if current_sub:
+                    plan_result = await self.db.execute(select(Plan).where(Plan.id == current_sub.plan_id))
+                    plan_obj = plan_result.scalar_one_or_none()
+                    plan_name = f"{plan_obj.name} ({current_sub.status})" if plan_obj else current_sub.status
+
+                # 1. Cancelar suscripción en Stripe
+                if settings.STRIPE_SECRET_KEY:
+                    stripe.api_key = settings.STRIPE_SECRET_KEY
+                    stripe_sub_result = await self.db.execute(
+                        select(StripeSubscription).where(
+                            StripeSubscription.organization_id == org.id,
+                            StripeSubscription.status.in_(["active", "trialing", "past_due"]),
+                        )
+                    )
+                    for ssub in stripe_sub_result.scalars().all():
+                        try:
+                            stripe.Subscription.cancel(ssub.stripe_subscription_id)
+                            subscription_cancelled = True
+                        except Exception:
+                            pass
+                        ssub.status = "cancelled"
+
+                # 2. Cancelar suscripciones locales
+                cancel_result = await self.db.execute(
+                    update(OrganizationSubscription)
+                    .where(
+                        OrganizationSubscription.organization_id == org.id,
+                        OrganizationSubscription.status.in_(["trial", "active"]),
+                    )
+                    .values(status="cancelled", updated_at=now)
+                )
+                if cancel_result.rowcount > 0:
+                    subscription_cancelled = True
+
+                # 3. Desactivar todas las tiendas
+                stores_result = await self.db.execute(
+                    update(Store)
+                    .where(Store.owner_id == user.id, Store.is_active.is_(True))
+                    .values(is_active=False)
+                )
+                stores_deactivated = stores_result.rowcount
+
+                # 4. Desactivar empleados de la organización
+                emp_result = await self.db.execute(
+                    update(User)
+                    .where(
+                        User.organization_id == org.id,
+                        User.id != user.id,
+                        User.is_active.is_(True),
+                    )
+                    .values(is_active=False, deleted_at=now)
+                )
+                employees_deactivated = emp_result.rowcount
+
+                # 5. Cerrar sesiones de todos los usuarios de la org
+                emp_ids_result = await self.db.execute(
+                    select(User.id).where(User.organization_id == org.id)
+                )
+                emp_ids = [row[0] for row in emp_ids_result.all()]
+                if emp_ids:
+                    await self.db.execute(
+                        update(SessionModel)
+                        .where(SessionModel.user_id.in_(emp_ids), SessionModel.is_active.is_(True))
+                        .values(is_active=False, ended_at=now, close_reason="account_deleted")
+                    )
+
         # Soft-delete: marcar usuario como eliminado
         user.is_active = False
-        user.deleted_at = datetime.now(timezone.utc)
+        user.deleted_at = now
 
-        # Cerrar todas las sesiones activas
+        # Cerrar sesiones activas del usuario
         await self.db.execute(
             update(SessionModel)
             .where(SessionModel.user_id == user.id, SessionModel.is_active.is_(True))
-            .values(is_active=False, ended_at=datetime.now(timezone.utc), close_reason="account_deleted")
+            .values(is_active=False, ended_at=now, close_reason="account_deleted")
         )
+
+        # Registrar en bitácora
+        log = AccountDeletionLog(
+            user_id=user.id,
+            email=user.email,
+            is_owner=user.is_owner,
+            organization_id=org_id,
+            stores_deactivated=stores_deactivated,
+            employees_deactivated=employees_deactivated,
+            subscription_cancelled=subscription_cancelled,
+            plan_at_deletion=plan_name,
+            details={"username": user.username, "phone": user.phone},
+        )
+        self.db.add(log)
 
         await self.db.flush()

@@ -101,3 +101,20 @@ class UserRolePermission(Base):
 
     user: Mapped[User] = relationship(back_populates="role_permissions")
     role: Mapped[Role] = relationship()
+
+
+class AccountDeletionLog(Base):
+    """Bitácora de eliminaciones de cuenta (lógicas). Registra quién, cuándo y datos de contexto."""
+    __tablename__ = "account_deletion_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(255))
+    is_owner: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    stores_deactivated: Mapped[int] = mapped_column(Integer, default=0)
+    employees_deactivated: Mapped[int] = mapped_column(Integer, default=0)
+    subscription_cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
+    plan_at_deletion: Mapped[str | None] = mapped_column(String(50))
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
