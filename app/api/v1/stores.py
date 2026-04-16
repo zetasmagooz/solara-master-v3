@@ -126,6 +126,8 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
             OrganizationSubscription.organization_id == org_id,
             OrganizationSubscription.status.in_(["active", "trial"]),
         )
+        .order_by(OrganizationSubscription.created_at.desc())
+        .limit(1)
     )
     sub = sub_result.scalar_one_or_none()
     if not sub:
@@ -171,7 +173,7 @@ async def _get_subscription_data(db: AsyncSession, user: User) -> dict | None:
     billable_additional = max(0, billable_count - included_total)
     pending_billing = active_count - billable_count
 
-    return {
+    result = {
         "active_stores_count": active_count,
         "max_stores": max_stores,
         "price_per_additional_store": price_extra,

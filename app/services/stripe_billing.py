@@ -515,6 +515,17 @@ class StripeBillingService:
                     if org_sub:
                         org_sub.updated_at = datetime.now(timezone.utc)
 
+                    # Cancelar suscripciones duplicadas (safety)
+                    await self.db.execute(
+                        update(OrganizationSubscription)
+                        .where(
+                            OrganizationSubscription.organization_id == organization_id,
+                            OrganizationSubscription.status.in_(["trial", "active"]),
+                            OrganizationSubscription.id != existing_sub.org_subscription_id,
+                        )
+                        .values(status="cancelled", updated_at=datetime.now(timezone.utc))
+                    )
+
                 await self.db.flush()
                 await self.db.refresh(existing_sub)
 
@@ -558,6 +569,17 @@ class StripeBillingService:
                         org_sub.started_at = period_start
                         org_sub.expires_at = period_end
                         org_sub.updated_at = datetime.now(timezone.utc)
+
+                    # Cancelar todas las demás suscripciones activas/trial de la misma org
+                    await self.db.execute(
+                        update(OrganizationSubscription)
+                        .where(
+                            OrganizationSubscription.organization_id == organization_id,
+                            OrganizationSubscription.status.in_(["trial", "active"]),
+                            OrganizationSubscription.id != existing_sub.org_subscription_id,
+                        )
+                        .values(status="cancelled", updated_at=datetime.now(timezone.utc))
+                    )
 
                 await self.db.flush()
                 await self.db.refresh(existing_sub)
@@ -829,6 +851,8 @@ class StripeBillingService:
                 StripeSubscription.organization_id == organization_id,
                 StripeSubscription.status.in_(["active", "trialing", "past_due"]),
             )
+            .order_by(StripeSubscription.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
