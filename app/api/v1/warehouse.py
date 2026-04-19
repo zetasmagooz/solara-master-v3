@@ -5,9 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.orm import selectinload
+
 from app.dependencies import get_current_user, get_db, require_owner
 from app.models.organization import Organization
 from app.models.store import Store
+from app.models.subscription import OrganizationSubscription
 from app.models.user import User
 from app.schemas.warehouse import (
     EntryCreate,
@@ -49,7 +52,7 @@ async def activate_warehouse(
     current_user: Annotated[User, Depends(require_owner)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Activa el almacén central para la organización del usuario (requiere 2+ tiendas).
+    """Activa el almacén central para la organización del usuario.
 
     **Ejemplo curl:**
     ```bash
@@ -67,20 +70,23 @@ async def activate_warehouse(
     if not org:
         raise HTTPException(404, "No tienes una organización")
 
-    # Validar: almacén solo con 2+ tiendas (no warehouse)
-    store_count_result = await db.execute(
-        select(func.count()).select_from(Store).where(
-            Store.owner_id == current_user.id,
-            Store.is_active.is_(True),
-            Store.is_warehouse.is_(False),
+    # Validar que el plan incluya el módulo "almacen"
+    sub_result = await db.execute(
+        select(OrganizationSubscription)
+        .where(
+            OrganizationSubscription.organization_id == org.id,
+            OrganizationSubscription.status.in_(["trial", "active"]),
         )
+        .options(selectinload(OrganizationSubscription.plan))
+        .order_by(OrganizationSubscription.created_at.desc())
+        .limit(1)
     )
-    store_count = store_count_result.scalar() or 0
-    if store_count < 2:
-        raise HTTPException(
-            400,
-            "Necesitas al menos 2 tiendas activas para activar el almacén central",
-        )
+    sub = sub_result.scalar_one_or_none()
+    if not sub or not sub.plan:
+        raise HTTPException(400, "No tienes una suscripción activa")
+    modules = (sub.plan.features or {}).get("modules", [])
+    if "almacen" not in modules:
+        raise HTTPException(400, f"Tu plan {sub.plan.name} no incluye el módulo de almacén")
 
     service = WarehouseService(db)
     store = await service.activate_warehouse(org.id, current_user.id)

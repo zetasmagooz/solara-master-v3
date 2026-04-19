@@ -59,34 +59,59 @@ class RestaurantService:
         return table
 
     async def get_tables(self, store_id: UUID) -> list[dict]:
-        """Get all active tables with their current session info."""
+        """Get all active tables with their current session info.
+
+        Optimized: fetches tables first, then only active sessions in a
+        single query instead of eager-loading all historical session_links.
+        """
+        # 1. Fetch tables (lightweight, no joins)
         result = await self.db.execute(
             select(RestaurantTable)
             .where(RestaurantTable.store_id == store_id, RestaurantTable.is_active.is_(True))
-            .options(selectinload(RestaurantTable.session_links).selectinload(TableSessionTable.session).selectinload(TableSession.orders))
             .order_by(RestaurantTable.sort_order, RestaurantTable.table_number)
         )
         tables = result.scalars().all()
+        if not tables:
+            return []
 
+        # 2. Fetch only active/requesting_bill sessions for this store (with orders + table links)
+        active_sessions_result = await self.db.execute(
+            select(TableSession)
+            .where(
+                TableSession.store_id == store_id,
+                TableSession.status.in_(["active", "requesting_bill"]),
+            )
+            .options(
+                selectinload(TableSession.orders),
+                selectinload(TableSession.table_links).selectinload(TableSessionTable.table),
+            )
+        )
+        active_sessions = active_sessions_result.scalars().unique().all()
+
+        # 3. Build table_id -> session map
+        table_session_map: dict[UUID, TableSession] = {}
+        for s in active_sessions:
+            for link in s.table_links:
+                table_session_map[link.table.id] = s
+
+        # 4. Assemble response
         out = []
         for t in tables:
             current_session = None
-            for link in t.session_links:
-                s = link.session
-                if s.status in ("active", "requesting_bill"):
-                    order_count = len(s.orders)
-                    total = sum(float(o.subtotal) for o in s.orders)
-                    current_session = {
-                        "id": s.id,
-                        "status": s.status,
-                        "service_type": s.service_type or "dine_in",
-                        "guest_count": s.guest_count,
-                        "customer_name": s.customer_name,
-                        "opened_at": s.opened_at,
-                        "order_count": order_count,
-                        "total": total,
-                    }
-                    break
+            s = table_session_map.get(t.id)
+            if s:
+                order_count = len(s.orders)
+                total = sum(float(o.subtotal) for o in s.orders)
+                current_session = {
+                    "id": s.id,
+                    "status": s.status,
+                    "service_type": s.service_type or "dine_in",
+                    "guest_count": s.guest_count,
+                    "customer_name": s.customer_name,
+                    "opened_at": s.opened_at,
+                    "order_count": order_count,
+                    "total": total,
+                }
             out.append({
                 "id": t.id,
                 "store_id": t.store_id,

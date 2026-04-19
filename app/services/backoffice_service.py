@@ -184,6 +184,7 @@ class BackofficeService:
         base = (
             select(
                 Organization.id,
+                Organization.owner_id,
                 Organization.name,
                 Organization.created_at,
                 Person.email.label("owner_email"),
@@ -217,13 +218,18 @@ class BackofficeService:
         today = datetime.now(timezone.utc).date()
         items = []
         for row in rows.all():
-            # Contar stores y users
+            # Contar stores del owner y users asignados a esas tiendas
             store_count = (await db.execute(
-                select(func.count(Store.id)).where(Store.organization_id == row.id)
+                select(func.count(Store.id)).where(Store.owner_id == row.owner_id)
             )).scalar() or 0
-            user_count = (await db.execute(
-                select(func.count(User.id)).where(User.organization_id == row.id)
-            )).scalar() or 0
+            # Usuarios únicos: owner + empleados asignados vía user_role_permissions
+            user_count_result = await db.execute(
+                select(func.count(func.distinct(UserRolePermission.user_id)))
+                .join(Store, Store.id == UserRolePermission.store_id)
+                .where(Store.owner_id == row.owner_id)
+            )
+            employee_count = user_count_result.scalar() or 0
+            user_count = employee_count + 1  # +1 por el owner
 
             # Total IA por organización: hoy y acumulado
             ai_today = (await db.execute(
@@ -344,7 +350,7 @@ class BackofficeService:
         }
 
     async def get_org_users_by_store(self, org_id: uuid.UUID) -> dict | None:
-        """Usuarios de una organización agrupados por tienda con su rol y permisos."""
+        """Usuarios agrupados por tienda. Busca por owner → tiendas → usuarios asignados."""
         db = self.db
 
         org = (await db.execute(
@@ -353,53 +359,43 @@ class BackofficeService:
         if not org:
             return None
 
-        # Tiendas de la organización
+        # Tiendas del owner (no por organization_id, sino por owner_id)
         stores_result = await db.execute(
-            select(Store.id, Store.name)
-            .where(Store.organization_id == org_id)
+            select(Store.id, Store.name, Store.is_active)
+            .where(Store.owner_id == org.owner_id)
             .order_by(Store.name)
         )
         stores = stores_result.all()
+        store_ids = [s.id for s in stores]
 
-        # Todos los usuarios de la organización
+        if not store_ids:
+            return {"stores": [], "unassigned_users": [], "total_users": 0}
+
+        # Obtener todas las asignaciones usuario-tienda-rol para estas tiendas
+        assign_result = await db.execute(
+            select(
+                UserRolePermission.user_id,
+                UserRolePermission.store_id,
+                Role.name.label("role_name"),
+                Role.permissions.label("role_permissions"),
+            )
+            .join(Role, Role.id == UserRolePermission.role_id)
+            .where(UserRolePermission.store_id.in_(store_ids))
+        )
+        assignments = assign_result.all()
+
+        # Recopilar todos los user_ids asignados
+        assigned_user_ids = {a.user_id for a in assignments}
+        # Incluir al owner
+        assigned_user_ids.add(org.owner_id)
+
+        # Obtener datos de todos los usuarios involucrados
         users_result = await db.execute(
             select(User.id, Person.first_name, Person.last_name, Person.email, User.is_active, User.is_owner)
             .join(Person, Person.id == User.person_id)
-            .where(User.organization_id == org_id)
+            .where(User.id.in_(assigned_user_ids))
         )
         all_users = users_result.all()
-
-        # Todas las asignaciones de rol-tienda para usuarios de esta org
-        user_ids = [u.id for u in all_users]
-        store_ids = [s.id for s in stores]
-
-        assignments = []
-        if user_ids and store_ids:
-            assign_result = await db.execute(
-                select(
-                    UserRolePermission.user_id,
-                    UserRolePermission.store_id,
-                    Role.name.label("role_name"),
-                    Role.permissions.label("role_permissions"),
-                    UserRolePermission.permissions.label("custom_permissions"),
-                )
-                .join(Role, Role.id == UserRolePermission.role_id)
-                .where(
-                    UserRolePermission.user_id.in_(user_ids),
-                    UserRolePermission.store_id.in_(store_ids),
-                )
-            )
-            assignments = assign_result.all()
-
-        # Indexar asignaciones: {(user_id, store_id): {role_name, permissions}}
-        assign_map: dict[tuple, dict] = {}
-        for a in assignments:
-            key = (str(a.user_id), str(a.store_id))
-            assign_map[key] = {
-                "role_name": a.role_name,
-                "role_permissions": a.role_permissions or [],
-                "custom_permissions": a.custom_permissions or {},
-            }
 
         # Indexar usuarios
         users_map = {
@@ -413,48 +409,46 @@ class BackofficeService:
             for u in all_users
         }
 
-        # Construir respuesta agrupada por tienda
-        stores_data = []
-        assigned_user_ids = set()
+        # Indexar asignaciones: {store_id: [{user_data + role}]}
+        store_users_map: dict[str, list] = {str(s.id): [] for s in stores}
+        seen_user_ids = set()
+        for a in assignments:
+            uid = str(a.user_id)
+            sid = str(a.store_id)
+            if uid in users_map and sid in store_users_map:
+                seen_user_ids.add(uid)
+                store_users_map[sid].append({
+                    **users_map[uid],
+                    "role_name": a.role_name,
+                    "role_permissions": a.role_permissions or [],
+                })
 
-        for store in stores:
-            store_users = []
-            for user in all_users:
-                key = (str(user.id), str(store.id))
-                assignment = assign_map.get(key)
-                if assignment:
-                    assigned_user_ids.add(str(user.id))
-                    store_users.append({
-                        **users_map[str(user.id)],
-                        "role_name": assignment["role_name"],
-                        "role_permissions": assignment["role_permissions"],
-                    })
-                elif user.is_owner:
-                    # Owner siempre aparece en todas las tiendas
-                    assigned_user_ids.add(str(user.id))
-                    store_users.append({
-                        **users_map[str(user.id)],
-                        "role_name": "Propietario",
-                        "role_permissions": ["*"],
-                    })
+        # Owner aparece en todas las tiendas
+        owner_id = str(org.owner_id)
+        if owner_id in users_map:
+            seen_user_ids.add(owner_id)
+            owner_data = {**users_map[owner_id], "role_name": "Propietario", "role_permissions": ["*"]}
+            for sid in store_users_map:
+                store_users_map[sid].insert(0, owner_data)
 
-            stores_data.append({
-                "store_id": str(store.id),
-                "store_name": store.name,
-                "users": store_users,
-            })
-
-        # Usuarios sin asignación de tienda
-        unassigned = [
-            {**users_map[uid], "role_name": None, "role_permissions": []}
-            for uid in users_map
-            if uid not in assigned_user_ids and not users_map[uid]["is_owner"]
+        # Construir respuesta
+        stores_data = [
+            {
+                "store_id": str(s.id),
+                "store_name": s.name,
+                "is_active": s.is_active,
+                "users": store_users_map[str(s.id)],
+            }
+            for s in stores
         ]
+
+        # Total único de usuarios (sin contar owner duplicado en cada tienda)
+        total_unique = len(seen_user_ids)
 
         return {
             "stores": stores_data,
-            "unassigned_users": unassigned,
-            "total_users": len(all_users),
+            "unassigned_users": [],
+            "total_users": total_unique,
         }
 
     # ── Planes ───────────────────────────────────────────

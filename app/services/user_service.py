@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.store import Store
 from app.models.user import Password, Person, Role, User, UserRolePermission
 from app.utils.security import hash_password, verify_password
 
@@ -54,13 +55,17 @@ class UserService:
         self.db.add(person)
         await self.db.flush()
 
-        # 2. User
+        # 2. User — obtener organization_id de la tienda
+        store_result = await self.db.execute(select(Store).where(Store.id == store_id))
+        store = store_result.scalar_one_or_none()
+
         user = User(
             username=username,
             email=email,
             phone=phone,
             person_id=person.id,
             default_store_id=store_id,
+            organization_id=store.organization_id if store else None,
             is_owner=False,
         )
         self.db.add(user)
