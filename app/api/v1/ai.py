@@ -27,6 +27,7 @@ from app.models.subscription import OrganizationSubscription
 from app.models.user import User
 from app.schemas.ai import AskRequest, AskResponse
 from app.services.ai.engine import OptimizedAIEngine
+from app.services.ai_usage_service import consume_ai_usage
 
 logger = logging.getLogger(__name__)
 
@@ -107,65 +108,9 @@ async def _record_ai_usage_detailed(
 
 
 async def _check_and_increment_ai_usage(db: AsyncSession, user: User) -> tuple[int, int]:
-    """Verifica límite de IA y retorna (used_today, limit). Lanza error si excede."""
-    org_id = user.organization_id
-    if not org_id:
-        return 0, -1
-
-    # Obtener plan y límite
-    sub_result = await db.execute(
-        select(OrganizationSubscription)
-        .where(
-            OrganizationSubscription.organization_id == org_id,
-            OrganizationSubscription.status.in_(["trial", "active"]),
-        )
-        .options(selectinload(OrganizationSubscription.plan))
-        .limit(1)
-    )
-    sub = sub_result.scalar_one_or_none()
-    limit = -1
-    if sub and sub.plan and sub.plan.features:
-        limit = sub.plan.features.get("ai_queries_per_day", -1)
-
-    today = date.today()
-
-    # Obtener o crear registro de uso diario
-    usage_result = await db.execute(
-        select(AiDailyUsage).where(
-            AiDailyUsage.organization_id == org_id,
-            AiDailyUsage.usage_date == today,
-        )
-    )
-    usage = usage_result.scalar_one_or_none()
-
-    current_count = usage.query_count if usage else 0
-
-    # Validar límite (-1 = ilimitado)
-    if limit != -1 and current_count >= limit:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "ai_limit_reached",
-                "message": f"Has alcanzado el límite de {limit} consultas IA por día",
-                "used": current_count,
-                "limit": limit,
-            },
-        )
-
-    # Incrementar
-    if usage:
-        usage.query_count += 1
-        usage.updated_at = datetime.now(timezone.utc)
-    else:
-        usage = AiDailyUsage(
-            organization_id=org_id,
-            usage_date=today,
-            query_count=1,
-        )
-        db.add(usage)
-
-    await db.flush()
-    return usage.query_count, limit
+    """Verifica límite de IA y retorna (used_today, limit). Lanza error si excede.
+    Wrapper sobre `consume_ai_usage(cost=1)` para compatibilidad."""
+    return await consume_ai_usage(db, user.organization_id, cost=1)
 
 
 @router.post("/ask", response_model=AskResponse)

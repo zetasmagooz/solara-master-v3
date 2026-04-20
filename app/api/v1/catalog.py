@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
@@ -34,8 +35,9 @@ from app.schemas.catalog import (
     SubcategoryResponse,
     SubcategoryUpdate,
 )
+from app.services.ai_usage_service import consume_ai_usage, get_ai_image_cost, get_plan_features
 from app.services.catalog_service import CatalogService
-from app.services.image_gen_service import generate_product_image
+from app.services.image_gen_service import generate_kiosk_banner_image, generate_product_image
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -838,9 +840,10 @@ async def generate_product_image_endpoint(
     product_id: UUID,
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Genera una imagen con IA para un producto a partir de su nombre y descripcion.
+    Cobra usos del contador diario de IA (configurable por plan, default 5).
 
     **Ejemplo curl:**
     ```bash
@@ -852,6 +855,11 @@ async def generate_product_image_endpoint(
     product = await service.get_product(product_id)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    features = await get_plan_features(db, current_user.organization_id)
+    cost = get_ai_image_cost(features)
+    await consume_ai_usage(db, current_user.organization_id, cost=cost)
+
     try:
         jpeg_bytes = await generate_product_image(product.name, product.description)
     except Exception as e:
@@ -859,9 +867,58 @@ async def generate_product_image_endpoint(
 
     import base64 as b64mod
     base64_data = f"data:image/jpeg;base64,{b64mod.b64encode(jpeg_bytes).decode()}"
-    # Always set as primary — frontend deletes old images before generating
     host_url = str(request.base_url).rstrip("/")
     return await service.save_product_image(product_id, base64_data, True, host_url)
+
+
+class CatalogImageGenerateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=500)
+
+
+class CatalogImageGenerateResponse(BaseModel):
+    image_url: str  # data:image/jpeg;base64,... — el frontend lo envía en el payload del create/update
+    ai_cost: int
+    ai_used: int
+    ai_limit: int
+
+
+@router.post("/ai/generate-image", response_model=CatalogImageGenerateResponse)
+async def generate_catalog_image(
+    data: CatalogImageGenerateRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Genera una imagen con IA para categoría/marca a partir de nombre y descripción.
+    No persiste — retorna base64 data URL que el frontend incluye en el payload de create/update.
+    Cobra usos del contador diario de IA (configurable por plan, default 5).
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/catalog/ai/generate-image \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"name": "Bebidas frías", "description": "Refrescos y jugos"}'
+    ```
+    """
+    features = await get_plan_features(db, current_user.organization_id)
+    cost = get_ai_image_cost(features)
+    used, limit = await consume_ai_usage(db, current_user.organization_id, cost=cost)
+
+    try:
+        jpeg_bytes = await generate_kiosk_banner_image(data.name, data.description)
+    except Exception as e:
+        # get_db hace rollback al propagar la excepción → no se cobran los usos
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Image generation failed: {e}")
+
+    import base64 as b64mod
+    base64_data = f"data:image/jpeg;base64,{b64mod.b64encode(jpeg_bytes).decode()}"
+    return CatalogImageGenerateResponse(
+        image_url=base64_data,
+        ai_cost=cost,
+        ai_used=used,
+        ai_limit=limit,
+    )
 
 
 @router.delete("/product-images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)

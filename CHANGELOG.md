@@ -2,6 +2,19 @@
 
 ## 2026-04-20
 
+### feat(catalog): generación de imagen con IA para categorías y marcas
+- Nuevo endpoint `POST /catalog/ai/generate-image` — recibe `{name, description?}`, cobra `features.ai_image_generation_cost` (default 5) del contador diario de IA, retorna `{image_url: "data:image/jpeg;base64,...", ai_cost, ai_used, ai_limit}` sin persistir. El frontend incluye `image_url` en el payload de create/update de categoría/marca.
+- Nuevo `generate_kiosk_banner_image(name, description?)` en `image_gen_service.py` — prompt específico para banner de kiosko: fotografía lifestyle realista, colores vibrantes, composición 1:1, sin texto/logos. Resultado: JPEG 512x512 (vs. 250x250 de productos). `generate_product_image` sigue intacto para fondos blancos de producto.
+- `app/services/ai_usage_service.py` — helper compartido `consume_ai_usage(db, org_id, cost)` que valida quota diaria e incrementa `AiDailyUsage.query_count` atómicamente. Lanza 429 con `{code, message, used, limit, cost}`. Reutilizado por `/ai/ask` (cost=1).
+- `POST /catalog/products/{id}/generate-image` ahora también cobra del contador IA (antes era gratis). Consistencia entre todos los puntos de generación de imagen con IA.
+- Si la llamada a DALL-E falla, `get_db` hace rollback → los usos no se cobran. Si el usuario cancela el modal en el frontend tras generar, sí se cobra (la llamada ya ocurrió).
+- Refactor: `_check_and_increment_ai_usage` en `api/v1/ai.py` ahora es un wrapper delgado sobre `consume_ai_usage(cost=1)`.
+
+### feat(plans): `ai_image_generation_cost` configurable por plan (default 5)
+- Nueva feature `ai_image_generation_cost` en `features` JSONB de los 4 planes (Starter, Pro, Premium, Ultimate) — seteada a 5 en DB dev vía `UPDATE plans SET features = features || '{"ai_image_generation_cost": 5}'::jsonb`.
+- `app/seeds/seed_plans.py` actualizado para reflejar el default en futuros bootstraps.
+- Motivación: regla del negocio "todo parametrizable por DB"; permite ajustar el costo sin deploy.
+
 ### feat(warehouse): auto-activación al suscribirse a planes con módulo almacén
 - `ensure_warehouse_for_plan(db, org_id, plan)` en `warehouse_service.py` — helper idempotente que activa el almacén si `plan.features.modules` incluye `'almacen'`
 - Enganchado en: `SubscriptionService.create_trial_subscription` (registro nuevo), `SubscriptionService.activate_plan` (cambio de plan), `StripeBillingService.create_subscription` (webhook Stripe), `BackofficeService.restore_account` (bow)

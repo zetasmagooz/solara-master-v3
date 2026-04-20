@@ -19,6 +19,7 @@ PLANS = [
         "sort_order": 1,
         "features": {
             "ai_queries_per_day": 30,
+            "ai_image_generation_cost": 5,
             "sales_per_day": -1,
             "max_products": 100,
             "max_users": 1,
@@ -43,6 +44,7 @@ PLANS = [
         "sort_order": 2,
         "features": {
             "ai_queries_per_day": 50,
+            "ai_image_generation_cost": 5,
             "sales_per_day": -1,
             "max_products": 200,
             "max_users": 4,
@@ -68,6 +70,7 @@ PLANS = [
         "sort_order": 3,
         "features": {
             "ai_queries_per_day": 80,
+            "ai_image_generation_cost": 5,
             "sales_per_day": -1,
             "max_products": 500,
             "max_users": 7,
@@ -94,6 +97,7 @@ PLANS = [
         "sort_order": 4,
         "features": {
             "ai_queries_per_day": 100,
+            "ai_image_generation_cost": 5,
             "sales_per_day": -1,
             "max_products": 1000,
             "max_users": 10,
