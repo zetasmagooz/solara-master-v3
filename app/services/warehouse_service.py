@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -9,6 +10,7 @@ from app.models.catalog import Brand, Category, Product, ProductImage, Subcatego
 from app.models.inventory import InventoryMovement
 from app.models.organization import Organization
 from app.models.store import Store
+from app.models.subscription import Plan
 from app.models.supply import Supply
 from app.models.user import User
 from app.models.warehouse import (
@@ -17,6 +19,38 @@ from app.models.warehouse import (
     WarehouseTransfer,
     WarehouseTransferItem,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def ensure_warehouse_for_plan(
+    db: AsyncSession, organization_id: uuid.UUID, plan: Plan
+) -> None:
+    """Si el plan incluye el módulo 'almacen', activa el almacén de la org (idempotente).
+
+    Se invoca desde los puntos de creación/activación de suscripciones
+    (trial, activate_plan, webhook Stripe, backoffice) para eliminar el paso manual.
+    No propaga excepciones: si falla la activación del almacén, no debe bloquear
+    la creación de la suscripción.
+    """
+    modules = (plan.features or {}).get("modules") or []
+    if "almacen" not in modules:
+        return
+    result = await db.execute(
+        select(Organization).where(Organization.id == organization_id)
+    )
+    org = result.scalar_one_or_none()
+    if not org or not org.owner_id:
+        return
+    if org.warehouse_enabled and org.warehouse_store_id:
+        return
+    try:
+        service = WarehouseService(db)
+        await service.activate_warehouse(organization_id, org.owner_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "ensure_warehouse_for_plan failed for org %s: %s", organization_id, e
+        )
 
 
 class WarehouseService:

@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.models.subscription import OrganizationSubscription, Plan
+from app.services.warehouse_service import ensure_warehouse_for_plan
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 TRIAL_DAYS = 30
@@ -65,6 +66,7 @@ class SubscriptionService:
         )
         self.db.add(sub)
         await self.db.flush()
+        await ensure_warehouse_for_plan(self.db, organization_id, ultimate)
         return sub
 
     async def activate_plan(self, organization_id: uuid.UUID, plan_slug: str) -> OrganizationSubscription:
@@ -93,6 +95,7 @@ class SubscriptionService:
         )
         self.db.add(sub)
         await self.db.flush()
+        await ensure_warehouse_for_plan(self.db, organization_id, plan)
 
         # Reload con plan
         result = await self.db.execute(

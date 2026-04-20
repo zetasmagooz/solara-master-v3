@@ -12,6 +12,7 @@ from app.models.organization import Organization
 from app.models.store import Store
 from app.models.stripe import StripeCustomer, StripeInvoice, StripePaymentMethod, StripeSubscription
 from app.models.subscription import OrganizationSubscription, Plan
+from app.services.warehouse_service import ensure_warehouse_for_plan
 
 logger = logging.getLogger(__name__)
 
@@ -630,6 +631,7 @@ class StripeBillingService:
         )
         self.db.add(org_sub)
         await self.db.flush()
+        await ensure_warehouse_for_plan(self.db, organization_id, plan)
 
         # Crear StripeSubscription
         stripe_sub = StripeSubscription(

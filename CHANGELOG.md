@@ -2,6 +2,13 @@
 
 ## 2026-04-20
 
+### feat(warehouse): auto-activación al suscribirse a planes con módulo almacén
+- `ensure_warehouse_for_plan(db, org_id, plan)` en `warehouse_service.py` — helper idempotente que activa el almacén si `plan.features.modules` incluye `'almacen'`
+- Enganchado en: `SubscriptionService.create_trial_subscription` (registro nuevo), `SubscriptionService.activate_plan` (cambio de plan), `StripeBillingService.create_subscription` (webhook Stripe), `BackofficeService.restore_account` (bow)
+- Script `scripts/backfill_warehouse_plans.py` para retroactivar orgs existentes con plan Premium/Ultimate que no tenían almacén activado (dry-run por defecto, `--apply` para ejecutar)
+- Backfill aplicado en prod: 17/17 orgs en Ultimate trial activadas
+- Motivación: orgs suscritas a Premium/Ultimate veían `400 "El almacén no está activado"` al entrar a Almacén aunque el plan lo incluyera; había que ejecutar `POST /warehouse/activate` manualmente. Ahora es transparente.
+
 ### feat(catalog): show_in_kiosk en marcas
 - `brands` ahora expone `show_in_kiosk` (BOOLEAN NOT NULL DEFAULT TRUE) — `ALTER TABLE` aplicado en `solara_dev`
 - `Brand` model, `BrandCreate`, `BrandUpdate`, `BrandResponse` aceptan y devuelven el campo
