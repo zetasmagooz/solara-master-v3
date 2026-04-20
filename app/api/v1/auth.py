@@ -275,6 +275,8 @@ async def delete_account(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Eliminar la cuenta del usuario autenticado (soft-delete). Requiere contraseña."""
+    import logging
+    logger = logging.getLogger(__name__)
     service = AuthService(db)
     try:
         await service.delete_account(current_user, data.password)
@@ -282,6 +284,10 @@ async def delete_account(
         return {"status": "ok", "message": "Cuenta eliminada"}
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error eliminando cuenta user_id={current_user.id}: {e}")
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno al eliminar cuenta: {str(e)}")
 
 
 @router.get("/business-types", response_model=list[BusinessTypeResponse])
