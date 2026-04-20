@@ -1169,9 +1169,6 @@ class CatalogService:
                 errors.append({"row_number": row_num, "field": "base_price", "message": "El precio debe ser mayor a 0"})
                 continue
             stock = r.get("stock", 0) or 0
-            if stock < 0:
-                errors.append({"row_number": row_num, "field": "stock", "message": "El stock no puede ser negativo"})
-                continue
 
             cat_name = (r.get("category_name") or "").strip()
             sub_name = (r.get("subcategory_name") or "").strip()
