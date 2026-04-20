@@ -17,6 +17,7 @@ class Brand(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     image_url: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_in_kiosk: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
 
     categories: Mapped[list["Category"]] = relationship(back_populates="brand")
 

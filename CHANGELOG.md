@@ -1,5 +1,13 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-20
+
+### feat(catalog): show_in_kiosk en marcas
+- `brands` ahora expone `show_in_kiosk` (BOOLEAN NOT NULL DEFAULT TRUE) — `ALTER TABLE` aplicado en `solara_dev`
+- `Brand` model, `BrandCreate`, `BrandUpdate`, `BrandResponse` aceptan y devuelven el campo
+- Empareja el comportamiento ya existente en `categories` y `subcategories`
+- Habilita el módulo "Kiosko > Marcas" en solarax-app para controlar visibilidad de marcas en el kiosko self-service
+
 ## 2026-04-13
 
 ### chore(plans): Eliminar tienda adicional gratis en Premium y Ultimate

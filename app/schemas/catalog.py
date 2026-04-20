@@ -21,12 +21,14 @@ class BrandCreate(BaseModel):
     name: str
     image_url: str | None = None
     is_active: bool = True
+    show_in_kiosk: bool = True
 
 
 class BrandUpdate(BaseModel):
     name: str | None = None
     image_url: str | None = None
     is_active: bool | None = None
+    show_in_kiosk: bool | None = None
 
 
 class BrandResponse(BaseModel):
@@ -35,6 +37,7 @@ class BrandResponse(BaseModel):
     name: str
     image_url: str | None = None
     is_active: bool
+    show_in_kiosk: bool = True
 
     model_config = {"from_attributes": True}
 
