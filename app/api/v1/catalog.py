@@ -874,6 +874,7 @@ async def generate_product_image_endpoint(
 class CatalogImageGenerateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=500)
+    orientation: str = Field(default="square", pattern="^(square|portrait)$")
 
 
 class CatalogImageGenerateResponse(BaseModel):
@@ -906,7 +907,9 @@ async def generate_catalog_image(
     used, limit = await consume_ai_usage(db, current_user.organization_id, cost=cost)
 
     try:
-        jpeg_bytes = await generate_kiosk_banner_image(data.name, data.description)
+        jpeg_bytes = await generate_kiosk_banner_image(
+            data.name, data.description, orientation=data.orientation
+        )
     except Exception as e:
         # get_db hace rollback al propagar la excepción → no se cobran los usos
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Image generation failed: {e}")

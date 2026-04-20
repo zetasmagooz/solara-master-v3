@@ -55,6 +55,28 @@ class KioskOrder(Base):
     items: Mapped[list["KioskOrderItem"]] = relationship(back_populates="kiosk_order", cascade="all, delete-orphan")
 
 
+class KioskPromotion(Base):
+    """Banner configurable para las pantallas del kiosko (bienvenida, selección de marcas,
+    selección de productos). Se configura desde el admin y se consume en la app del kiosko."""
+    __tablename__ = "kiosk_promotions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    screen: Mapped[str] = mapped_column(String(30), nullable=False)  # welcome | brand_select | product_select
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    price_label: Mapped[str | None] = mapped_column(String(50))  # texto libre: "$99", "2x1", "Desde $50"
+    image_url: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    linked_product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("products.id"))
+    linked_brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("brands.id"))
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class KioskOrderItem(Base):
     __tablename__ = "kiosk_order_items"
 

@@ -63,3 +63,55 @@ class KioskOrderStatusResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# --- Kiosk Promotions ---
+ALLOWED_PROMOTION_SCREENS = {"welcome", "brand_select", "product_select"}
+
+
+class KioskPromotionCreate(BaseModel):
+    screen: str
+    title: str
+    description: str | None = None
+    price_label: str | None = None
+    image_url: str | None = None
+    is_active: bool = True
+    sort_order: int = 0
+    linked_product_id: UUID | None = None
+    linked_brand_id: UUID | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class KioskPromotionUpdate(BaseModel):
+    screen: str | None = None
+    title: str | None = None
+    description: str | None = None
+    price_label: str | None = None
+    image_url: str | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+    linked_product_id: UUID | None = None
+    linked_brand_id: UUID | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class KioskPromotionResponse(BaseModel):
+    id: UUID
+    store_id: UUID
+    screen: str
+    title: str
+    description: str | None = None
+    price_label: str | None = None
+    image_url: str | None = None
+    is_active: bool
+    sort_order: int
+    linked_product_id: UUID | None = None
+    linked_brand_id: UUID | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

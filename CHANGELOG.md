@@ -2,6 +2,18 @@
 
 ## 2026-04-20
 
+### feat(kiosk): módulo de Promociones configurables por pantalla
+- Tabla `kiosk_promotions` (UUID PK, screen VARCHAR(30), title, description, price_label VARCHAR(50) texto libre — acepta "$99" o "2x1" —, image_url, is_active, sort_order, linked_product_id/linked_brand_id FK opcionales, starts_at/ends_at TIMESTAMPTZ opcionales, created_at/updated_at). Índices por `(store_id, screen)` y `(store_id, is_active, starts_at, ends_at)`. Aplicada en DB dev.
+- Pantallas soportadas inicialmente: `welcome` / `brand_select` / `product_select` (enum-like via VARCHAR, extensible sin migración).
+- Nuevo módulo `app/services/kiosk_promotion_service.py` con CRUD y filtro por `active_only` (valida `is_active` + ventana `starts_at`/`ends_at`).
+- Nuevos endpoints (autenticados) en `app/api/v1/kiosk_promotions.py` con prefix `/kiosk/promotions`:
+  - `GET /kiosk/promotions?store_id=...&screen=...&active_only=bool`
+  - `POST /kiosk/promotions` (acepta `image_url` base64 → persistido en `/uploads/kiosk_promotions/`)
+  - `PATCH /kiosk/promotions/{id}`
+  - `DELETE /kiosk/promotions/{id}`
+- `generate_kiosk_banner_image` ahora acepta `orientation="portrait"` → DALL-E `1024x1536` + prompt hero vertical para banner de bienvenida; resultado 720x1280 JPEG. El endpoint `POST /catalog/ai/generate-image` expone el parámetro `orientation: "square" | "portrait"`.
+- `kiosko_promociones` agregado al `modules` de los 4 planes en `seed_plans.py` + UPDATE en DB dev.
+
 ### feat(catalog): generación de imagen con IA para categorías y marcas
 - Nuevo endpoint `POST /catalog/ai/generate-image` — recibe `{name, description?}`, cobra `features.ai_image_generation_cost` (default 5) del contador diario de IA, retorna `{image_url: "data:image/jpeg;base64,...", ai_cost, ai_used, ai_limit}` sin persistir. El frontend incluye `image_url` en el payload de create/update de categoría/marca.
 - Nuevo `generate_kiosk_banner_image(name, description?)` en `image_gen_service.py` — prompt específico para banner de kiosko: fotografía lifestyle realista, colores vibrantes, composición 1:1, sin texto/logos. Resultado: JPEG 512x512 (vs. 250x250 de productos). `generate_product_image` sigue intacto para fondos blancos de producto.
