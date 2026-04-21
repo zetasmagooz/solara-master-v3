@@ -2,6 +2,13 @@
 
 ## 2026-04-20
 
+### feat(kiosk): submódulo Configuración (branding + comportamiento + pagos)
+- Tabla `kiosk_settings` con `store_id UNIQUE` (una fila por tienda): `logo_url`, `primary_color`/`secondary_color` VARCHAR(7) hex, `welcome_message`/`goodbye_message` TEXT, `idle_timeout_seconds` INT default 60, `ask_customer_name` BOOLEAN default false, `accept_cash/card/transfer/ecartpay` BOOLEAN (cash y card default true). Aplicada en DB dev.
+- Endpoints (autenticados) con prefix `/kiosk/settings`:
+  - `GET /kiosk/settings?store_id=...` — retorna la config (crea fila con defaults si no existía).
+  - `PUT /kiosk/settings?store_id=...` — upsert, soporta `logo_url` base64 → persistido en `/uploads/kiosk_settings/`. Solo campos presentes en el body se actualizan (incluye `null` para limpiar).
+- `kiosko_configuracion` agregado al `modules` de los 4 planes en `seed_plans.py` + UPDATE en DB dev.
+
 ### feat(kiosk): módulo de Promociones configurables por pantalla
 - Tabla `kiosk_promotions` (UUID PK, screen VARCHAR(30), title, description, price_label VARCHAR(50) texto libre — acepta "$99" o "2x1" —, image_url, is_active, sort_order, linked_product_id/linked_brand_id FK opcionales, starts_at/ends_at TIMESTAMPTZ opcionales, created_at/updated_at). Índices por `(store_id, screen)` y `(store_id, is_active, starts_at, ends_at)`. Aplicada en DB dev.
 - Pantallas soportadas inicialmente: `welcome` / `brand_select` / `product_select` (enum-like via VARCHAR, extensible sin migración).

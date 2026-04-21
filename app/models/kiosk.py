@@ -77,6 +77,35 @@ class KioskPromotion(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
 
 
+class KioskSettings(Base):
+    """Configuración del kiosko por tienda (una fila por store).
+    Incluye branding, comportamiento y métodos de pago aceptados."""
+    __tablename__ = "kiosk_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False, unique=True)
+
+    # Branding
+    logo_url: Mapped[str | None] = mapped_column(Text)
+    primary_color: Mapped[str | None] = mapped_column(String(7))
+    secondary_color: Mapped[str | None] = mapped_column(String(7))
+    welcome_message: Mapped[str | None] = mapped_column(Text)
+    goodbye_message: Mapped[str | None] = mapped_column(Text)
+
+    # Comportamiento
+    idle_timeout_seconds: Mapped[int] = mapped_column(Integer, server_default=text("60"), default=60)
+    ask_customer_name: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
+
+    # Pagos aceptados
+    accept_cash: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
+    accept_card: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
+    accept_transfer: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
+    accept_ecartpay: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+
+
 class KioskOrderItem(Base):
     __tablename__ = "kiosk_order_items"
 

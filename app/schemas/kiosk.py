@@ -97,6 +97,41 @@ class KioskPromotionUpdate(BaseModel):
     ends_at: datetime | None = None
 
 
+class KioskSettingsUpdate(BaseModel):
+    """Payload parcial para upsert de configuración del kiosko."""
+    logo_url: str | None = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    welcome_message: str | None = None
+    goodbye_message: str | None = None
+    idle_timeout_seconds: int | None = None
+    ask_customer_name: bool | None = None
+    accept_cash: bool | None = None
+    accept_card: bool | None = None
+    accept_transfer: bool | None = None
+    accept_ecartpay: bool | None = None
+
+
+class KioskSettingsResponse(BaseModel):
+    id: UUID
+    store_id: UUID
+    logo_url: str | None = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    welcome_message: str | None = None
+    goodbye_message: str | None = None
+    idle_timeout_seconds: int
+    ask_customer_name: bool
+    accept_cash: bool
+    accept_card: bool
+    accept_transfer: bool
+    accept_ecartpay: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class KioskPromotionResponse(BaseModel):
     id: UUID
     store_id: UUID
