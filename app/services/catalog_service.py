@@ -18,6 +18,7 @@ from app.models.combo import Combo, ComboItem
 from app.models.modifier import ModifierGroup, ModifierOption, ProductModifierGroup
 from app.models.supply import ProductSupply, Supply
 from app.models.variant import ProductVariant, VariantGroup, VariantOption
+from app.utils.changelog import record_change
 
 
 class CatalogService:
@@ -79,6 +80,7 @@ class CatalogService:
         category = Category(store_id=store_id, **kwargs)
         self.db.add(category)
         await self.db.flush()
+        await record_change(self.db, store_id, "category", category.id, "create")
         return category
 
     async def update_category(self, category_id: UUID, **kwargs) -> Category | None:
@@ -90,6 +92,7 @@ class CatalogService:
             if value is not None:
                 setattr(category, key, value)
         await self.db.flush()
+        await record_change(self.db, category.store_id, "category", category.id, "update")
         return category
 
     async def delete_category(self, category_id: UUID) -> bool:
@@ -99,6 +102,7 @@ class CatalogService:
             return False
         category.is_active = False
         await self.db.flush()
+        await record_change(self.db, category.store_id, "category", category.id, "delete")
         return True
 
     # --- Subcategories ---
@@ -106,6 +110,7 @@ class CatalogService:
         subcategory = Subcategory(store_id=store_id, **kwargs)
         self.db.add(subcategory)
         await self.db.flush()
+        await record_change(self.db, store_id, "subcategory", subcategory.id, "create")
         return subcategory
 
     async def get_subcategories(self, category_id: UUID):
@@ -126,6 +131,7 @@ class CatalogService:
             if value is not None:
                 setattr(sub, key, value)
         await self.db.flush()
+        await record_change(self.db, sub.store_id, "subcategory", sub.id, "update")
         return sub
 
     async def delete_subcategory(self, subcategory_id: UUID) -> bool:
@@ -135,6 +141,7 @@ class CatalogService:
             return False
         sub.is_active = False
         await self.db.flush()
+        await record_change(self.db, sub.store_id, "subcategory", sub.id, "delete")
         return True
 
     # --- Brands ---
@@ -317,6 +324,7 @@ class CatalogService:
         product = Product(store_id=store_id, **kwargs)
         self.db.add(product)
         await self.db.flush()
+        await record_change(self.db, store_id, "product", product.id, "create")
         return await self.get_product(product.id)
 
     async def create_product_with_attributes(self, store_id: UUID, attributes_data: list[dict], **kwargs) -> Product:
@@ -341,6 +349,7 @@ class CatalogService:
             if value is not None:
                 setattr(product, key, value)
         await self.db.flush()
+        await record_change(self.db, product.store_id, "product", product.id, "update")
         return await self.get_product(product.id)
 
     async def delete_product(self, product_id: UUID) -> bool:
@@ -350,6 +359,7 @@ class CatalogService:
             return False
         product.is_active = False
         await self.db.flush()
+        await record_change(self.db, product.store_id, "product", product.id, "delete")
         return True
 
     async def toggle_favorite(self, product_id: UUID) -> Product:
@@ -917,6 +927,7 @@ class CatalogService:
         combo = Combo(store_id=store_id, **kwargs)
         self.db.add(combo)
         await self.db.flush()
+        await record_change(self.db, store_id, "combo", combo.id, "create")
         return combo
 
     async def create_combo_item(self, combo_id: UUID, **kwargs) -> ComboItem:
@@ -944,6 +955,7 @@ class CatalogService:
             if value is not None:
                 setattr(combo, key, value)
         await self.db.flush()
+        await record_change(self.db, combo.store_id, "combo", combo.id, "update")
         return combo
 
     async def delete_combo(self, combo_id: UUID) -> bool:
@@ -953,6 +965,7 @@ class CatalogService:
             return False
         combo.is_active = False
         await self.db.flush()
+        await record_change(self.db, combo.store_id, "combo", combo.id, "delete")
         return True
 
     async def update_combo_item(self, item_id: UUID, **kwargs) -> ComboItem | None:

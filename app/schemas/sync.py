@@ -31,6 +31,7 @@ class EntityChange(BaseModel):
 
 class ChangesResponse(BaseModel):
     changes: list[EntityChange]
+    changed_entity_types: list[str] = []
     synced_at: datetime
 
 

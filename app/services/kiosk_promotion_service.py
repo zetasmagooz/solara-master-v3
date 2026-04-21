@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kiosk import KioskPromotion
 from app.schemas.kiosk import ALLOWED_PROMOTION_SCREENS
+from app.utils.changelog import record_change
 
 
 class KioskPromotionService:
@@ -45,6 +46,7 @@ class KioskPromotionService:
         promo = KioskPromotion(store_id=store_id, **kwargs)
         self.db.add(promo)
         await self.db.flush()
+        await record_change(self.db, store_id, "promotion", promo.id, "create")
         return promo
 
     async def update_promotion(self, promotion_id: UUID, **kwargs) -> KioskPromotion | None:
@@ -57,12 +59,16 @@ class KioskPromotionService:
             setattr(promo, key, value)
         promo.updated_at = datetime.now(timezone.utc)
         await self.db.flush()
+        await record_change(self.db, promo.store_id, "promotion", promo.id, "update")
         return promo
 
     async def delete_promotion(self, promotion_id: UUID) -> bool:
         promo = await self.get_promotion(promotion_id)
         if not promo:
             return False
+        store_id = promo.store_id
+        promo_id = promo.id
         await self.db.delete(promo)
         await self.db.flush()
+        await record_change(self.db, store_id, "promotion", promo_id, "delete")
         return True

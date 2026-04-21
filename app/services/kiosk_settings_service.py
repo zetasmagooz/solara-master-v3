@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kiosk import KioskSettings
+from app.utils.changelog import record_change
 
 
 class KioskSettingsService:
@@ -32,4 +33,5 @@ class KioskSettingsService:
             setattr(settings, key, value)
         settings.updated_at = datetime.now(timezone.utc)
         await self.db.flush()
+        await record_change(self.db, store_id, "settings", settings.id, "update")
         return settings

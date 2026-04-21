@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.attribute import ProductAttribute
 from app.models.catalog import Category, Product
-from app.models.combo import Combo
+from app.models.combo import Combo, ComboItem
 from app.models.modifier import ModifierGroup
 from app.models.sync import EntityChangelog
 from app.models.variant import ProductVariant
@@ -27,6 +28,11 @@ class SyncService:
         products = await self.db.execute(
             select(Product)
             .where(Product.store_id == store_id, Product.is_active.is_(True), Product.show_in_kiosk.is_(True))
+            .options(
+                selectinload(Product.brand),
+                selectinload(Product.images),
+                selectinload(Product.attributes).selectinload(ProductAttribute.definition),
+            )
             .order_by(Product.sort_order)
         )
 
@@ -46,7 +52,7 @@ class SyncService:
         combos = await self.db.execute(
             select(Combo)
             .where(Combo.store_id == store_id, Combo.is_active.is_(True), Combo.show_in_kiosk.is_(True))
-            .options(selectinload(Combo.items))
+            .options(selectinload(Combo.items).selectinload(ComboItem.product))
         )
 
         return {
@@ -65,7 +71,9 @@ class SyncService:
             .order_by(EntityChangelog.changed_at)
         )
         changes = result.scalars().all()
+        changed_types = list({c.entity_type for c in changes})
         return {
             "changes": changes,
+            "changed_entity_types": changed_types,
             "synced_at": datetime.now(timezone.utc),
         }

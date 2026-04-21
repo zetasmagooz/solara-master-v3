@@ -25,6 +25,7 @@ from app.models.stripe import StripeInvoice, StripeSubscription
 from app.models.store import Store
 from app.models.subscription import OrganizationSubscription, Plan
 from app.models.user import Password, Person, Role, User, UserRolePermission
+from app.services.warehouse_service import ensure_warehouse_for_plan
 
 
 class BackofficeService:
@@ -2084,4 +2085,178 @@ class BackofficeService:
                 key=lambda x: x["total_revenue"],
                 reverse=True,
             ),
+        }
+
+    # ── Restaurar Cuentas ───────────────────────────────
+
+    async def get_deleted_accounts(self, page: int = 1, page_size: int = 15, search: str | None = None) -> dict:
+        """Lista cuentas eliminadas (soft-deleted) con info de org, plan y tiendas."""
+        from app.models.user import AccountDeletionLog
+
+        base = (
+            select(User)
+            .where(User.deleted_at.isnot(None))
+            .order_by(User.deleted_at.desc())
+        )
+
+        if search:
+            q = f"%{search.lower()}%"
+            base = base.where(
+                (func.lower(User.email).like(q)) |
+                (func.lower(User.username).like(q))
+            )
+
+        # Count
+        count_q = select(func.count()).select_from(base.subquery())
+        total = (await self.db.execute(count_q)).scalar() or 0
+        total_pages = max(1, (total + page_size - 1) // page_size)
+
+        # Paginate
+        result = await self.db.execute(base.offset((page - 1) * page_size).limit(page_size))
+        users = result.scalars().all()
+
+        items = []
+        for u in users:
+            # Get person name
+            name = None
+            if u.person_id:
+                person_result = await self.db.execute(select(Person).where(Person.id == u.person_id))
+                person = person_result.scalar_one_or_none()
+                if person:
+                    name = f"{person.first_name or ''} {person.last_name or ''}".strip() or None
+
+            # Get org info
+            org_name = None
+            stores_count = 0
+            employees_count = 0
+            if u.organization_id:
+                org_result = await self.db.execute(select(Organization).where(Organization.id == u.organization_id))
+                org = org_result.scalar_one_or_none()
+                if org:
+                    org_name = org.name
+                # Count stores (even deactivated)
+                sc = await self.db.execute(
+                    select(func.count()).select_from(Store).where(Store.owner_id == u.id)
+                )
+                stores_count = sc.scalar() or 0
+                # Count employees
+                ec = await self.db.execute(
+                    select(func.count()).select_from(User).where(
+                        User.organization_id == u.organization_id, User.id != u.id
+                    )
+                )
+                employees_count = ec.scalar() or 0
+
+            # Get deletion log for plan info
+            plan_at_deletion = None
+            log_result = await self.db.execute(
+                select(AccountDeletionLog).where(AccountDeletionLog.user_id == u.id).order_by(AccountDeletionLog.deleted_at.desc()).limit(1)
+            )
+            log = log_result.scalar_one_or_none()
+            if log:
+                plan_at_deletion = log.plan_at_deletion
+
+            items.append({
+                "id": u.id,
+                "email": u.email,
+                "username": u.username,
+                "name": name,
+                "phone": u.phone,
+                "is_owner": u.is_owner,
+                "deleted_at": u.deleted_at,
+                "org_name": org_name,
+                "plan_at_deletion": plan_at_deletion,
+                "stores_count": stores_count,
+                "employees_count": employees_count,
+            })
+
+        return {"items": items, "total": total, "page": page, "page_size": page_size, "total_pages": total_pages}
+
+    async def restore_account(self, user_id: uuid.UUID, plan_id: uuid.UUID, trial_days: int, admin_id: uuid.UUID) -> dict:
+        """Restaura una cuenta eliminada: reactiva user, org, tiendas, empleados y crea trial."""
+        from datetime import timedelta
+
+        # 1. Buscar usuario eliminado
+        result = await self.db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise ValueError("Usuario no encontrado")
+        if user.is_active and user.deleted_at is None:
+            raise ValueError("Esta cuenta ya está activa")
+
+        # 2. Verificar que el plan existe
+        plan_result = await self.db.execute(select(Plan).where(Plan.id == plan_id, Plan.is_active.is_(True)))
+        plan = plan_result.scalar_one_or_none()
+        if not plan:
+            raise ValueError("Plan no encontrado o no está activo")
+
+        now = datetime.now(timezone.utc)
+
+        # 3. Reactivar usuario
+        user.is_active = True
+        user.deleted_at = None
+
+        # 4. Si es owner, reactivar org, tiendas y empleados
+        stores_reactivated = 0
+        employees_reactivated = 0
+        if user.is_owner and user.organization_id:
+            # Reactivar tiendas
+            stores_result = await self.db.execute(
+                update(Store)
+                .where(Store.owner_id == user.id, Store.is_active.is_(False))
+                .values(is_active=True)
+            )
+            stores_reactivated = stores_result.rowcount
+
+            # Reactivar empleados
+            emp_result = await self.db.execute(
+                update(User)
+                .where(
+                    User.organization_id == user.organization_id,
+                    User.id != user.id,
+                    User.is_active.is_(False),
+                    User.deleted_at.isnot(None),
+                )
+                .values(is_active=True, deleted_at=None)
+            )
+            employees_reactivated = emp_result.rowcount
+
+        # 5. Crear nueva suscripción trial
+        new_sub = OrganizationSubscription(
+            organization_id=user.organization_id,
+            plan_id=plan_id,
+            status="trial",
+            started_at=now,
+            expires_at=now + timedelta(days=trial_days),
+        )
+        self.db.add(new_sub)
+        await self.db.flush()
+        await ensure_warehouse_for_plan(self.db, user.organization_id, plan)
+
+        # 6. Asegurar que no pida cambio de contraseña (el usuario ya tiene su password)
+        pwd_result = await self.db.execute(select(Password).where(Password.user_id == user.id))
+        pwd = pwd_result.scalar_one_or_none()
+        if pwd:
+            pwd.require_change = False
+
+        # 7. Audit log
+        await self.log_audit(
+            admin_user_id=admin_id,
+            action="restore_account",
+            entity_type="user",
+            entity_id=user.id,
+            details={
+                "email": user.email,
+                "plan_name": plan.name,
+                "trial_days": trial_days,
+                "stores_reactivated": stores_reactivated,
+                "employees_reactivated": employees_reactivated,
+            },
+        )
+
+        return {
+            "status": "ok",
+            "message": f"Cuenta restaurada con plan {plan.name} ({trial_days} días de trial)",
+            "user_id": user.id,
+            "new_subscription_id": new_sub.id,
         }

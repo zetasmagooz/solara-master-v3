@@ -32,6 +32,9 @@ from app.schemas.backoffice import (
     BowUpdatePlanRequest,
     BowExtendPlanRequest,
     BowExtendPlanResponse,
+    BowDeletedAccountResponse,
+    BowRestoreAccountRequest,
+    BowRestoreAccountResponse,
 )
 from app.services.backoffice_service import BackofficeService
 
@@ -574,3 +577,34 @@ async def get_payments_summary(
 ):
     """Resumen de facturación (KPIs)."""
     return await service.get_invoices_summary()
+
+
+# ── Restaurar Cuentas ───────────────────────────────────
+
+@router.get("/deleted-accounts")
+async def list_deleted_accounts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(15, ge=1, le=100),
+    search: str | None = Query(None),
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Lista cuentas eliminadas (soft-deleted) con paginación y búsqueda."""
+    return await service.get_deleted_accounts(page, page_size, search)
+
+
+@router.post("/deleted-accounts/{user_id}/restore", response_model=BowRestoreAccountResponse)
+async def restore_account(
+    user_id: uuid.UUID,
+    data: BowRestoreAccountRequest,
+    current_user: BowUser = Depends(get_current_bow_user),
+    db: AsyncSession = Depends(get_db),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Restaura una cuenta eliminada: reactiva usuario, org, tiendas y crea trial."""
+    try:
+        result = await service.restore_account(user_id, data.plan_id, data.trial_days, current_user.id)
+        await db.commit()
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

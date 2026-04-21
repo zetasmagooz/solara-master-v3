@@ -355,3 +355,31 @@ class BowPaginatedResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+# ── Restaurar Cuentas ──────────────────────────────────
+
+class BowDeletedAccountResponse(BaseModel):
+    id: uuid.UUID
+    email: str | None
+    username: str | None
+    name: str | None
+    phone: str | None
+    is_owner: bool
+    deleted_at: datetime | None
+    org_name: str | None = None
+    plan_at_deletion: str | None = None
+    stores_count: int = 0
+    employees_count: int = 0
+
+
+class BowRestoreAccountRequest(BaseModel):
+    plan_id: uuid.UUID
+    trial_days: int = Field(ge=1, le=365, default=14)
+
+
+class BowRestoreAccountResponse(BaseModel):
+    status: str
+    message: str
+    user_id: uuid.UUID
+    new_subscription_id: uuid.UUID | None = None
