@@ -8,9 +8,14 @@ from PIL import Image
 from app.config import settings
 
 
-async def _run_dalle(prompt: str, portrait: bool = False) -> bytes:
+async def _run_dalle(prompt: str, portrait: bool = False, landscape: bool = False) -> bytes:
     """Llama a DALL-E y devuelve los bytes crudos de la imagen generada."""
-    size = "1024x1536" if portrait else "1024x1024"
+    if portrait:
+        size = "1024x1536"
+    elif landscape:
+        size = "1536x1024"
+    else:
+        size = "1024x1024"
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     response = await client.images.generate(
         model="gpt-image-1",
@@ -100,13 +105,27 @@ async def generate_kiosk_banner_image(
             "Tall 9:16 vertical composition that fills a portrait kiosk screen, with negative space at the top "
             "suitable for overlaying a title. Subject placed in the lower-center third."
         )
+    elif orientation == "wide_banner":
+        prompt = (
+            f"Ultra-wide horizontal banner for a self-service kiosk top strip: {name}.{desc_part} "
+            f"{common} "
+            "Very wide horizontal composition with the main subject placed along a central horizontal strip, "
+            "empty contextual space on both sides suitable for overlaying short title and price. "
+            "The image should look great when cropped to a thin horizontal slice (~6:1 aspect)."
+        )
     else:
         prompt = (
             f"Cinematic lifestyle commercial photograph for a self-service kiosk banner: {name}.{desc_part} "
             f"{common} "
             "Square 1:1 composition framed so the subject is centered and works as a kiosk tile."
         )
-    raw = await _run_dalle(prompt, portrait=(orientation == "portrait"))
+    raw = await _run_dalle(
+        prompt,
+        portrait=(orientation == "portrait"),
+        landscape=(orientation == "wide_banner"),
+    )
     if orientation == "portrait":
         return _finalize_jpeg_wh(raw, 720, 1280)
+    if orientation == "wide_banner":
+        return _finalize_jpeg_wh(raw, 1080, 163)  # 1080:163 ≈ 6.6:1 (100% × 8.5% del kiosko)
     return _finalize_jpeg(raw, 512)

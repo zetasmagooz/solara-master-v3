@@ -874,7 +874,7 @@ async def generate_product_image_endpoint(
 class CatalogImageGenerateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=500)
-    orientation: str = Field(default="square", pattern="^(square|portrait)$")
+    orientation: str = Field(default="square", pattern="^(square|portrait|wide_banner)$")
 
 
 class CatalogImageGenerateResponse(BaseModel):

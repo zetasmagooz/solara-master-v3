@@ -2,6 +2,11 @@
 
 ## 2026-04-20
 
+### feat(kiosk): promociones brand_select ahora banner wide + linked_combo_id
+- `ALTER TABLE kiosk_promotions ADD COLUMN linked_combo_id UUID REFERENCES combos(id) ON DELETE SET NULL` aplicado en DB dev. Modelo y schemas actualizados.
+- `generate_kiosk_banner_image` acepta nuevo `orientation="wide_banner"` → DALL-E landscape 1536x1024 + prompt banner horizontal + crop+resize a 1080x163 (100% ancho × 8.5% alto del kiosko portrait, aspect ≈ 6.6:1).
+- `POST /catalog/ai/generate-image` expone `orientation: "square" | "portrait" | "wide_banner"`.
+
 ### feat(kiosk): submódulo Configuración (branding + comportamiento + pagos)
 - Tabla `kiosk_settings` con `store_id UNIQUE` (una fila por tienda): `logo_url`, `primary_color`/`secondary_color` VARCHAR(7) hex, `welcome_message`/`goodbye_message` TEXT, `idle_timeout_seconds` INT default 60, `ask_customer_name` BOOLEAN default false, `accept_cash/card/transfer/ecartpay` BOOLEAN (cash y card default true). Aplicada en DB dev.
 - Endpoints (autenticados) con prefix `/kiosk/settings`:

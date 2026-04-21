@@ -79,6 +79,7 @@ class KioskPromotionCreate(BaseModel):
     sort_order: int = 0
     linked_product_id: UUID | None = None
     linked_brand_id: UUID | None = None
+    linked_combo_id: UUID | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
@@ -93,6 +94,7 @@ class KioskPromotionUpdate(BaseModel):
     sort_order: int | None = None
     linked_product_id: UUID | None = None
     linked_brand_id: UUID | None = None
+    linked_combo_id: UUID | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
 
@@ -144,6 +146,7 @@ class KioskPromotionResponse(BaseModel):
     sort_order: int
     linked_product_id: UUID | None = None
     linked_brand_id: UUID | None = None
+    linked_combo_id: UUID | None = None
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     created_at: datetime
