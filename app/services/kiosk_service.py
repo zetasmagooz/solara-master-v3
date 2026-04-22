@@ -153,7 +153,12 @@ class KioskService:
             )
 
             sale_service = SaleService(self.db)
-            await sale_service.create_sale(sale_data, user_id=None)
+            sale = await sale_service.create_sale(sale_data, user_id=None)
+
+            # Guardar sale_number en la orden del kiosko
+            if sale.sale_number:
+                order.local_id = sale.sale_number
+                await self.db.flush()
         except Exception as e:
             # Si falla la creación de Sale, no bloquear la orden del kiosko
             import logging
