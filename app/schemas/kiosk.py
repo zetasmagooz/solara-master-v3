@@ -35,6 +35,7 @@ class KioskOrderItemCreate(BaseModel):
 class KioskOrderCreate(BaseModel):
     customer_name: str | None = None
     payment_method: str | None = None
+    order_type: str | None = "dine_in"
     notes: str | None = None
     local_id: str | None = None
     items: list[KioskOrderItemCreate]
@@ -52,6 +53,7 @@ class KioskOrderResponse(BaseModel):
     payment_method: str | None = None
     notes: str | None = None
     local_id: str | None = None
+    order_type: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

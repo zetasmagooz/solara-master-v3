@@ -54,6 +54,7 @@ class KioskService:
             device_id=device_id,
             store_id=store_id,
             customer_name=data.customer_name,
+            order_type=data.order_type,
             payment_method=data.payment_method,
             notes=data.notes,
             local_id=data.local_id,

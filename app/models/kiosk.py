@@ -42,6 +42,7 @@ class KioskOrder(Base):
     device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id"), nullable=False)
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200))
+    order_type: Mapped[str | None] = mapped_column(String(20), default="dine_in")
     status: Mapped[str] = mapped_column(String(20), default="pending")
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     tax: Mapped[float] = mapped_column(Numeric(12, 2), default=0)

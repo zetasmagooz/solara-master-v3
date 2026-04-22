@@ -196,6 +196,7 @@ class ProductCreate(BaseModel):
     show_in_kiosk: bool = True
     can_return_to_inventory: bool = True
     sort_order: int = 0
+    preparation_time: int | None = None
     attributes: list[ProductAttributeCreate] = []
 
 
@@ -222,6 +223,7 @@ class ProductUpdate(BaseModel):
     can_return_to_inventory: bool | None = None
     sort_order: int | None = None
     is_favorite: bool | None = None
+    preparation_time: int | None = None
 
 
 class ProductResponse(BaseModel):
@@ -250,6 +252,7 @@ class ProductResponse(BaseModel):
     can_return_to_inventory: bool = True
     sort_order: int
     is_favorite: bool = False
+    preparation_time: int | None = None
     created_at: datetime
     category: CategoryResponse | None = None
     brand: BrandResponse | None = None
