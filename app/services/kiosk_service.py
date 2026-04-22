@@ -5,9 +5,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.catalog import Product
 from app.models.kiosk import KioskDevice, KioskOrder, KioskOrderItem, KioskSession
 from app.schemas.kiosk import KioskOrderCreate
+from app.schemas.sale import SaleCreate, SaleItemCreate, PaymentCreate
+from app.services.sale_service import SaleService
 from app.utils.security import create_access_token
+
+
+# Mapeo de método de pago del kiosko al payment_type de Sale
+KIOSK_PAYMENT_TYPE_MAP = {
+    "cash": 1,
+    "card": 2,
+    "nfc": 2,      # Apple/Google Pay = tarjeta
+    "qr": 5,       # QR = transferencia
+    "transfer": 5,
+}
+
+KIOSK_PAYMENT_METHOD_MAP = {
+    "cash": "cash",
+    "card": "card",
+    "nfc": "card",
+    "qr": "transfer",
+    "transfer": "transfer",
+}
 
 
 class KioskService:
@@ -45,11 +66,21 @@ class KioskService:
             "store_id": device.store_id,
         }
 
+    async def _get_product_names(self, product_ids: list[UUID]) -> dict[UUID, str]:
+        """Obtiene nombres de productos por sus IDs."""
+        if not product_ids:
+            return {}
+        result = await self.db.execute(
+            select(Product.id, Product.name).where(Product.id.in_(product_ids))
+        )
+        return {row.id: row.name for row in result.all()}
+
     async def create_kiosk_order(self, device_id: UUID, store_id: UUID, data: KioskOrderCreate) -> KioskOrder:
         subtotal = sum(item.unit_price * item.quantity for item in data.items)
         tax = 0.0
         total = subtotal + tax
 
+        # 1. Crear KioskOrder (registro interno del kiosko)
         order = KioskOrder(
             device_id=device_id,
             store_id=store_id,
@@ -82,6 +113,52 @@ class KioskService:
             self.db.add(item)
 
         await self.db.flush()
+
+        # 2. Crear Sale real (aparece en ventas de solarax-app y cortes de caja)
+        try:
+            product_ids = [item.product_id for item in data.items if item.product_id]
+            product_names = await self._get_product_names(product_ids)
+
+            payment_method = data.payment_method or "cash"
+            payment_type = KIOSK_PAYMENT_TYPE_MAP.get(payment_method, 1)
+            sale_method = KIOSK_PAYMENT_METHOD_MAP.get(payment_method, "cash")
+
+            sale_data = SaleCreate(
+                store_id=store_id,
+                subtotal=subtotal,
+                tax=tax,
+                total=total,
+                payment_type=payment_type,
+                platform="kiosk",
+                status="completed",
+                items=[
+                    SaleItemCreate(
+                        product_id=item.product_id,
+                        variant_id=item.variant_id,
+                        combo_id=item.combo_id,
+                        name=product_names.get(item.product_id, "Producto") if item.product_id else "Producto",
+                        quantity=item.quantity,
+                        unit_price=item.unit_price,
+                        modifiers_json=item.modifiers,
+                        removed_supplies_json=item.removed_supplies,
+                    )
+                    for item in data.items
+                ],
+                payments=[
+                    PaymentCreate(
+                        method=sale_method,
+                        amount=total,
+                    )
+                ],
+            )
+
+            sale_service = SaleService(self.db)
+            await sale_service.create_sale(sale_data, user_id=None)
+        except Exception as e:
+            # Si falla la creación de Sale, no bloquear la orden del kiosko
+            import logging
+            logging.getLogger(__name__).error(f"Failed to create sale for kiosk order {order.id}: {e}")
+
         return order
 
     async def get_order_status(self, order_id: UUID) -> KioskOrder | None:
