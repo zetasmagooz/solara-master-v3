@@ -13,7 +13,7 @@ class KioskDevice(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
-    device_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    device_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     device_name: Mapped[str | None] = mapped_column(String(100))
     device_info: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
