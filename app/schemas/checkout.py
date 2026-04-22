@@ -37,6 +37,7 @@ class MovementResponse(BaseModel):
     user_name: str | None = None
     has_free_sale: bool = False
     discount: float = 0
+    platform: str | None = None
 
     model_config = {"from_attributes": True}
 

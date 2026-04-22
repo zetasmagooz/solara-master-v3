@@ -237,7 +237,7 @@ class CheckoutService:
         )
 
         sales_stmt = (
-            select(Sale.id, Sale.sale_number, Sale.total, Sale.discount, Sale.created_at, Sale.user_id)
+            select(Sale.id, Sale.sale_number, Sale.total, Sale.discount, Sale.created_at, Sale.user_id, Sale.platform)
             .where(
                 Sale.store_id == store_id,
                 Sale.status != "cancelled",
@@ -261,6 +261,7 @@ class CheckoutService:
                 user_name=user_name_map.get(row.user_id) if row.user_id else None,
                 has_free_sale=row.id in free_sale_ids,
                 discount=float(row.discount or 0),
+                platform=row.platform,
             ))
 
         # Deposits
