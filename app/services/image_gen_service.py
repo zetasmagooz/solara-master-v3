@@ -94,7 +94,6 @@ async def enhance_image(image_base64: str, context: str = "product") -> bytes:
     )
 
     response = await client.images.edit(
-        model="gpt-image-1",
         image=png_bytes,
         prompt=prompt,
         size="1024x1024",
