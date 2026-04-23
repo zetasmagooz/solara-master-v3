@@ -93,12 +93,11 @@ async def enhance_image(image_base64: str, context: str = "product") -> bytes:
         "No text, no watermarks, no logos, no borders."
     )
 
-    response = await client.images.generate(
+    response = await client.images.edit(
         model="gpt-image-1",
-        prompt=prompt,
         image=png_bytes,
+        prompt=prompt,
         size="1024x1024",
-        quality="low",
         n=1,
     )
 
