@@ -70,46 +70,48 @@ def _finalize_jpeg_wh(raw_bytes: bytes, width: int, height: int) -> bytes:
 
 async def enhance_image(image_base64: str, context: str = "product") -> bytes:
     """Mejora una imagen subida por el usuario dándole aspecto profesional de estudio.
-    Usa gpt-image-1 images.generate() con la imagen como input de referencia.
+    1. Usa GPT-4o vision para describir el contenido de la imagen
+    2. Usa gpt-image-1 para generar una versión profesional basada en la descripción
     Recibe base64, retorna JPEG mejorado en bytes."""
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-    # Decodificar base64 a PNG
-    raw_bytes = base64.b64decode(image_base64)
-    img = Image.open(io.BytesIO(raw_bytes))
-    if img.mode == "RGBA":
-        img = img.convert("RGB")
-    img = img.resize((1024, 1024), Image.LANCZOS)
-    png_buffer = io.BytesIO()
-    img.save(png_buffer, format="PNG")
-    png_bytes = png_buffer.getvalue()
+    # Paso 1: Describir la imagen con GPT-4o vision
+    data_url = f"data:image/jpeg;base64,{image_base64}"
+    vision_response = await client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Describe this image in detail for recreating it as a professional studio photo. "
+                        "Include: the main subject, colors, arrangement, type of food/product, and any "
+                        "distinguishing features. Be specific and concise (max 200 words). "
+                        "Do NOT mention photo quality, lighting, or camera settings — only describe WHAT is in the image."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                },
+            ],
+        }],
+        max_tokens=300,
+    )
+    description = vision_response.choices[0].message.content or "product photo"
 
+    # Paso 2: Generar versión profesional con gpt-image-1
     prompt = (
-        "Enhance this photo to look like a professional commercial studio photograph. "
-        "Improve lighting to be clean and well-balanced, add subtle shadows for depth, "
-        "make colors more vibrant and appetizing, ensure the background is clean and uncluttered. "
-        "Keep the SAME subject and composition — only improve the photographic quality. "
-        "The result should look like a high-end e-commerce or restaurant menu photo. "
-        "No text, no watermarks, no logos, no borders."
+        f"Professional commercial studio photograph of: {description}. "
+        "Shot with a full-frame 50mm lens, clean white or neutral background, "
+        "perfect studio lighting with soft shadows, vibrant natural colors, "
+        "high-end e-commerce quality, appetizing and attractive presentation. "
+        "No text, no watermarks, no logos, no borders, no UI elements."
     )
 
-    response = await client.images.edit(
-        image=png_bytes,
-        prompt=prompt,
-        size="1024x1024",
-        n=1,
-    )
-
-    result_b64 = response.data[0].b64_json
-    if result_b64:
-        result_bytes = base64.b64decode(result_b64)
-    else:
-        async with httpx.AsyncClient() as http:
-            resp = await http.get(response.data[0].url)
-            resp.raise_for_status()
-            result_bytes = resp.content
-
-    return _finalize_jpeg(result_bytes, 512)
+    raw = await _run_image_gen(prompt)
+    return _finalize_jpeg(raw, 512)
 
 
 async def generate_product_image(name: str, description: str | None = None) -> bytes:
