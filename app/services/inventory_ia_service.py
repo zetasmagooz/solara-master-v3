@@ -20,6 +20,9 @@ from app.models.user import User
 from app.schemas.inventory import (
     IAActionType,
     IAApplyResponse,
+    IABatchItem,
+    IAPreviewBatchItem,
+    IAPreviewBatchResponse,
     IAPreviewExample,
     IAPreviewResponse,
     IASearchResponse,
@@ -350,6 +353,170 @@ class InventoryIAService:
             )
             self.db.add(adj_item)
             p.stock = new
+            applied += 1
+
+        adjustment.total_items = applied
+        await self.db.flush()
+
+        return IAApplyResponse(
+            adjustment_id=str(adjustment.id),
+            applied_count=applied,
+            status="completed",
+            created_at=adjustment.created_at.isoformat()
+            if adjustment.created_at
+            else datetime.now(timezone.utc).isoformat(),
+        )
+
+    # ── Batch preview / apply (multi-producto con cantidades individuales) ──
+
+    async def _load_batch_products(
+        self,
+        store_id: uuid.UUID,
+        items: list[IABatchItem],
+    ) -> tuple[dict[uuid.UUID, Product], list[IABatchItem]]:
+        """Carga productos del batch en una sola query y los valida.
+
+        Retorna (mapa product_id → Product, items con UUID ya parseado).
+        Lanza ValueError si algún producto no existe, no pertenece al store o está inactivo.
+        """
+        parsed: list[tuple[uuid.UUID, float]] = []
+        for it in items:
+            try:
+                pid = uuid.UUID(it.product_id)
+            except (ValueError, AttributeError) as exc:
+                raise ValueError(f"product_id inválido: {it.product_id}") from exc
+            parsed.append((pid, float(it.quantity)))
+
+        product_ids = [pid for pid, _ in parsed]
+        stmt = select(Product).where(
+            Product.id.in_(product_ids),
+            Product.store_id == store_id,
+            Product.is_active == True,  # noqa: E712
+        )
+        rows = (await self.db.execute(stmt)).scalars().all()
+        product_map: dict[uuid.UUID, Product] = {p.id: p for p in rows}
+
+        missing = [str(pid) for pid, _ in parsed if pid not in product_map]
+        if missing:
+            raise ValueError(
+                f"Productos no encontrados o inactivos en la tienda: {', '.join(missing)}"
+            )
+
+        # Devolver items ya parseados como lista de (uuid, qty) envueltos en IABatchItem
+        normalized = [IABatchItem(product_id=str(pid), quantity=qty) for pid, qty in parsed]
+        return product_map, normalized
+
+    async def preview_batch(
+        self,
+        store_id: uuid.UUID,
+        action: str,
+        items: list[IABatchItem],
+        source_scope: str | None = None,
+        source_id: str | None = None,
+    ) -> IAPreviewBatchResponse:
+        product_map, normalized = await self._load_batch_products(store_id, items)
+
+        source_name: str | None = None
+        if source_scope and source_id:
+            try:
+                source_name = await self._get_target_name(source_scope, uuid.UUID(source_id))
+            except (ValueError, AttributeError):
+                source_name = None
+
+        preview_items: list[IAPreviewBatchItem] = []
+        negatives = 0
+        zeros = 0
+        large_stock = 0
+
+        for it in normalized:
+            pid = uuid.UUID(it.product_id)
+            product = product_map[pid]
+            current = float(product.stock or 0)
+            new = self._calc_new_stock(current, action, float(it.quantity))
+
+            if new < 0:
+                negatives += 1
+            elif new == 0:
+                zeros += 1
+            if new > 1000:
+                large_stock += 1
+
+            preview_items.append(IAPreviewBatchItem(
+                product_id=str(pid),
+                product_name=product.name,
+                before=current,
+                after=round(max(new, 0), 2),
+                quantity=float(it.quantity),
+            ))
+
+        warnings: list[str] = []
+        if negatives > 0:
+            warnings.append(f"{negatives} producto(s) quedarían con stock negativo (se fijarán en 0)")
+        if zeros > 0:
+            warnings.append(f"{zeros} producto(s) quedarán sin stock (0 unidades)")
+        if len(normalized) >= MANY_PRODUCTS_THRESHOLD:
+            warnings.append(f"Este ajuste modificará {len(normalized)} productos")
+        if large_stock > 0:
+            warnings.append(f"{large_stock} producto(s) quedarán con stock mayor a 1,000")
+
+        return IAPreviewBatchResponse(
+            action=action,
+            affected_count=len(normalized),
+            source_scope=source_scope,
+            source_name=source_name,
+            warnings=warnings,
+            items=preview_items,
+        )
+
+    async def apply_batch(
+        self,
+        store_id: uuid.UUID,
+        user_id: uuid.UUID,
+        action: str,
+        items: list[IABatchItem],
+        source_scope: str | None = None,
+        source_id: str | None = None,
+    ) -> IAApplyResponse:
+        product_map, normalized = await self._load_batch_products(store_id, items)
+
+        action_labels = {"add": "Sumar", "subtract": "Restar", "replace": "Reemplazar"}
+        source_fragment = ""
+        if source_scope and source_id:
+            name = await self._get_target_name(source_scope, uuid.UUID(source_id))
+            source_fragment = f" — desde {source_scope}: {name}"
+        reason = (
+            f"Ajuste IA — {action_labels.get(action, action)} batch "
+            f"({len(normalized)} productos){source_fragment}"
+        )
+
+        adjustment = InventoryAdjustment(
+            store_id=store_id,
+            user_id=user_id,
+            reason=reason,
+            total_items=len(normalized),
+        )
+        self.db.add(adjustment)
+        await self.db.flush()
+
+        applied = 0
+        for it in normalized:
+            pid = uuid.UUID(it.product_id)
+            product = product_map[pid]
+            current = float(product.stock or 0)
+            new = self._calc_new_stock(current, action, float(it.quantity))
+
+            if new < 0:
+                new = 0
+
+            adj_item = InventoryAdjustmentItem(
+                adjustment_id=adjustment.id,
+                product_id=product.id,
+                variant_id=None,
+                previous_stock=current,
+                new_stock=new,
+            )
+            self.db.add(adj_item)
+            product.stock = new
             applied += 1
 
         adjustment.total_items = applied

@@ -1,5 +1,15 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-23
+
+### feat(inventory-ia): endpoints batch para ajuste multi-producto con cantidades individuales
+- `POST /inventory/ia/preview-batch` y `POST /inventory/ia/apply-batch` — aceptan `{ action, items: [{product_id, quantity}], source_scope?, source_id? }`. Permiten ajustar N productos con cantidades diferentes en una sola operación (ej. sumar 5 huevos, 10 cafés, 3 galletas).
+- `source_scope` (`product`/`category`/`brand`) y `source_id` son opcionales — se usan solo para auditoría del `reason` del ajuste cuando los productos vinieron pre-filtrados desde una categoría o marca.
+- Nuevos schemas: `IABatchItem`, `IAPreviewBatchRequest`, `IAApplyBatchRequest`, `IAPreviewBatchItem`, `IAPreviewBatchResponse`, `IABatchSourceScope`.
+- `InventoryIAService.preview_batch` / `apply_batch` reusan `InventoryAdjustment` e `InventoryAdjustmentItem` existentes → el flujo de `undo` (máx 30 min) funciona igual para batch.
+- Validación: carga productos en una sola query (`WHERE id IN (...)`) y valida que todos existan, pertenezcan al store y estén activos antes de aplicar; stock negativo se clamp a 0.
+- Endpoints `/inventory/ia/preview` y `/inventory/ia/apply` se mantienen sin cambios (usados por el flujo legacy de supplier/combo que ajusta la misma cantidad a todos los productos del grupo).
+
 ## 2026-04-20
 
 ### feat(kiosk): promociones brand_select ahora banner wide + linked_combo_id
