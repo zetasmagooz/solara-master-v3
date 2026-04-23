@@ -69,14 +69,16 @@ def _finalize_jpeg_wh(raw_bytes: bytes, width: int, height: int) -> bytes:
 
 
 async def enhance_image(image_base64: str, context: str = "product") -> bytes:
-    """Mejora una imagen subida por el usuario dándole aspecto profesional de estudio.
-    1. Usa GPT-4o vision para describir el contenido de la imagen
-    2. Usa gpt-image-1 para generar una versión profesional basada en la descripción
+    """Mejora una imagen conservando su esencia.
+    1. GPT-4.1-mini vision analiza la imagen en detalle
+    2. gpt-image-1 genera una versión mejorada que conserva el mismo sujeto,
+       composición y esencia pero con iluminación, fondo y colores profesionales.
     Recibe base64, retorna JPEG mejorado en bytes."""
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-    # Paso 1: Describir la imagen con GPT-4o vision
     data_url = f"data:image/jpeg;base64,{image_base64}"
+
+    # Paso 1: Analizar la imagen con visión para capturar cada detalle
     vision_response = await client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{
@@ -85,10 +87,12 @@ async def enhance_image(image_base64: str, context: str = "product") -> bytes:
                 {
                     "type": "text",
                     "text": (
-                        "Describe this image in detail for recreating it as a professional studio photo. "
-                        "Include: the main subject, colors, arrangement, type of food/product, and any "
-                        "distinguishing features. Be specific and concise (max 200 words). "
-                        "Do NOT mention photo quality, lighting, or camera settings — only describe WHAT is in the image."
+                        "Describe this image in extreme detail so it can be recreated faithfully. "
+                        "Include: exact subject (product, food, item), exact colors and textures, "
+                        "arrangement and position of every element, shape, toppings, garnishes, "
+                        "container/plate type, and any small details. "
+                        "The description must be precise enough to recreate this EXACT same image. "
+                        "Max 300 words. Only describe what you see, no opinions."
                     ),
                 },
                 {
@@ -97,17 +101,20 @@ async def enhance_image(image_base64: str, context: str = "product") -> bytes:
                 },
             ],
         }],
-        max_tokens=300,
+        max_tokens=400,
     )
-    description = vision_response.choices[0].message.content or "product photo"
+    description = vision_response.choices[0].message.content or "product"
 
-    # Paso 2: Generar versión profesional con gpt-image-1
+    # Paso 2: Regenerar con mejoras profesionales conservando la esencia
     prompt = (
-        f"Professional commercial studio photograph of: {description}. "
-        "Shot with a full-frame 50mm lens, clean white or neutral background, "
-        "perfect studio lighting with soft shadows, vibrant natural colors, "
-        "high-end e-commerce quality, appetizing and attractive presentation. "
-        "No text, no watermarks, no logos, no borders, no UI elements."
+        f"Recreate this EXACT image faithfully with professional studio quality: {description}. "
+        "IMPORTANT: Keep the SAME subject, SAME composition, SAME arrangement, SAME colors, "
+        "SAME elements — do NOT change what is in the photo. "
+        "Only improve: professional studio lighting with soft diffused light, "
+        "clean and uncluttered background appropriate for the subject, "
+        "enhanced color vibrancy while staying natural, subtle depth of field, "
+        "commercial photography quality suitable for e-commerce or restaurant menu. "
+        "No text, no watermarks, no logos, no borders."
     )
 
     raw = await _run_image_gen(prompt)

@@ -935,7 +935,8 @@ async def enhance_catalog_image(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Mejora una imagen subida por el usuario con IA para darle aspecto profesional.
-    Recibe base64 de la imagen original, retorna base64 de la imagen mejorada.
+    Analiza la imagen con vision, luego regenera conservando la esencia
+    pero con iluminación, fondo y colores de estudio.
 
     **Ejemplo curl:**
     ```bash
