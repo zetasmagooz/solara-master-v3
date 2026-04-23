@@ -68,6 +68,51 @@ def _finalize_jpeg_wh(raw_bytes: bytes, width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
+async def enhance_image(image_base64: str, context: str = "product") -> bytes:
+    """Mejora una imagen subida por el usuario dándole aspecto profesional de estudio.
+    Recibe base64, retorna JPEG mejorado en bytes."""
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    # Decodificar base64 a PNG (formato requerido por la API de edición)
+    raw_bytes = base64.b64decode(image_base64)
+    img = Image.open(io.BytesIO(raw_bytes))
+    if img.mode == "RGBA":
+        img = img.convert("RGB")
+    # Resize a 1024x1024 para la API
+    img = img.resize((1024, 1024), Image.LANCZOS)
+    png_buffer = io.BytesIO()
+    img.save(png_buffer, format="PNG")
+    png_bytes = png_buffer.getvalue()
+
+    prompt = (
+        "Enhance this photo to look like a professional commercial studio photograph. "
+        "Improve lighting to be clean and well-balanced, add subtle shadows for depth, "
+        "make colors more vibrant and appetizing, ensure the background is clean and uncluttered. "
+        "Keep the SAME subject and composition — only improve the photographic quality. "
+        "The result should look like a high-end e-commerce or restaurant menu photo. "
+        "No text, no watermarks, no logos, no borders."
+    )
+
+    response = await client.images.edit(
+        model="gpt-image-1",
+        image=png_bytes,
+        prompt=prompt,
+        size="1024x1024",
+        n=1,
+    )
+
+    result_b64 = response.data[0].b64_json
+    if result_b64:
+        result_bytes = base64.b64decode(result_b64)
+    else:
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(response.data[0].url)
+            resp.raise_for_status()
+            result_bytes = resp.content
+
+    return _finalize_jpeg(result_bytes, 512)
+
+
 async def generate_product_image(name: str, description: str | None = None) -> bytes:
     """Genera foto de producto (fondo blanco de estudio) 250x250 JPEG."""
     desc_part = f" {description}." if description else ""
