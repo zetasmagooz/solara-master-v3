@@ -70,11 +70,11 @@ def _finalize_jpeg_wh(raw_bytes: bytes, width: int, height: int) -> bytes:
 
 async def enhance_image(image_base64: str, context: str = "product") -> bytes:
     """Mejora una imagen subida por el usuario dándole aspecto profesional de estudio.
-    Usa gpt-image-1 con la imagen como referencia para generar una versión mejorada.
+    Usa gpt-image-1 images.generate() con la imagen como input de referencia.
     Recibe base64, retorna JPEG mejorado en bytes."""
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-    # Decodificar base64 a PNG para enviar como referencia
+    # Decodificar base64 a PNG
     raw_bytes = base64.b64decode(image_base64)
     img = Image.open(io.BytesIO(raw_bytes))
     if img.mode == "RGBA":
@@ -93,23 +93,23 @@ async def enhance_image(image_base64: str, context: str = "product") -> bytes:
         "No text, no watermarks, no logos, no borders."
     )
 
-    response = await client.images.edit(
-        model="dall-e-2",
-        image=png_bytes,
+    response = await client.images.generate(
+        model="gpt-image-1",
         prompt=prompt,
+        image=png_bytes,
         size="1024x1024",
+        quality="low",
         n=1,
     )
 
-    result_url = response.data[0].url
-    if result_url:
+    result_b64 = response.data[0].b64_json
+    if result_b64:
+        result_bytes = base64.b64decode(result_b64)
+    else:
         async with httpx.AsyncClient() as http:
-            resp = await http.get(result_url)
+            resp = await http.get(response.data[0].url)
             resp.raise_for_status()
             result_bytes = resp.content
-    else:
-        result_b64 = response.data[0].b64_json
-        result_bytes = base64.b64decode(result_b64)
 
     return _finalize_jpeg(result_bytes, 512)
 
