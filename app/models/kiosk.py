@@ -19,8 +19,13 @@ class KioskDevice(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    # Kiosko como entidad contratable (Fase 0 addon)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    kiosko_number: Mapped[int | None] = mapped_column(Integer)
+    kiosko_code: Mapped[str | None] = mapped_column(String(20), unique=True)
 
     sessions: Mapped[list["KioskSession"]] = relationship(back_populates="device")
+    password: Mapped["KioskoPassword | None"] = relationship(back_populates="kiosko", uselist=False)
 
 
 class KioskSession(Base):
@@ -128,3 +133,18 @@ class KioskOrderItem(Base):
     removed_supplies: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
 
     kiosk_order: Mapped[KioskOrder] = relationship(back_populates="items")
+
+
+class KioskoPassword(Base):
+    """Contraseña del kiosko (independiente del owner). Primer login fuerza cambio."""
+    __tablename__ = "kiosko_passwords"
+
+    kiosko_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id", ondelete="CASCADE"), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    require_change: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
+    last_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    last_changed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    kiosko: Mapped["KioskDevice"] = relationship(back_populates="password")

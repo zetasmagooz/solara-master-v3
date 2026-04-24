@@ -1,5 +1,16 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-24
+
+### feat(kiosko-addon): Fase 0 — schema para módulo Kiosko contratable
+- **Nueva tabla `plan_addons`**: catálogo de addons por plan (ahora con `kiosko`). Campos: `plan_id`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`. UNIQUE(`plan_id`, `addon_type`). Seed idempotente en `app/seeds/seed_plan_addons.py` — precio global 149 MXN/kiosko (editable desde backoffice).
+- **Nueva tabla `organization_subscription_addons`**: addons contratados por cada suscripción. Campos: `subscription_id`, `addon_id`, `quantity`, `unit_price`, `is_active`. Index por `subscription_id`.
+- **`kiosk_devices`** gana: `owner_user_id` (FK users), `kiosko_number` (int consecutivo por store), `kiosko_code` (VARCHAR 20 UNIQUE, formato `K001`). Campos nullable para convivir con dispositivos existentes hasta backfill.
+- **Nueva tabla `kiosko_passwords`**: password independiente por kiosko (no la del owner). Campos: `kiosko_id` PK, `password_hash`, `require_change` (default true), `last_changed_at`, `last_changed_by_user_id`. Primer login fuerza cambio.
+- **`sales`** gana: `kiosko_id` (FK `kiosk_devices`, nullable) + CHECK constraint `ck_sales_user_or_kiosko`: `user_id IS NOT NULL OR kiosko_id IS NOT NULL`. Backfill dentro de la migración: 20 ventas huérfanas (19 Crepas + 1 otra) reasignadas al owner de la org.
+- **Permisos**: nuevo módulo `kiosko` en `app/constants/permissions.py` con acciones `ver`, `contratar`, `editar`, `desactivar`, `reset_pwd`. Agregado `kiosko:ver` al rol Gerente. Administrador los recibe automáticamente.
+- **Migración**: `m7n8o9p0q1r2_add_kiosko_addon_tables.py` (incluye backfill de `sales.user_id`).
+
 ## 2026-04-23
 
 ### feat(kiosk): cobro desde POS con cart editable + Sale completa en respuesta

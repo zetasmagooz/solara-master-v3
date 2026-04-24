@@ -159,6 +159,17 @@ PERMISSION_MODULES = {
             "ajustes:kiosko": "Configurar kiosko",
         },
     },
+    "kiosko": {
+        "label": "Kioskos",
+        "icon": "tablet-portrait",
+        "actions": {
+            "kiosko:ver": "Ver kioskos contratados",
+            "kiosko:contratar": "Contratar kiosko (alta)",
+            "kiosko:editar": "Editar kiosko",
+            "kiosko:desactivar": "Desactivar kiosko",
+            "kiosko:reset_pwd": "Resetear contraseña del kiosko",
+        },
+    },
     "usuarios": {
         "label": "Usuarios",
         "icon": "person",
@@ -337,6 +348,8 @@ DEFAULT_ROLES = {
             # Usuarios (solo ver)
             "usuarios:ver",
             "usuarios:ver_roles",
+            # Kioskos (solo ver)
+            "kiosko:ver",
         ],
     },
 }
