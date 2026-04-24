@@ -20,7 +20,7 @@ from app.models.subscription import (
     PlanAddon,
 )
 from app.models.user import User
-from app.utils.security import hash_password, verify_password
+from app.utils.security import create_access_token, create_refresh_token, hash_password, verify_password
 
 
 KIOSKO_ADDON_TYPE = "kiosko"
@@ -217,6 +217,60 @@ class KioskoAddonService:
             kiosko.password.last_changed_by_user_id = actor.id
         await self.db.flush()
         return kiosko, temp
+
+    async def authenticate(self, kiosko_code: str, password: str) -> tuple[KioskDevice, dict]:
+        """Autentica un kiosko por código+password. Valida addon activo. Emite JWT."""
+        result = await self.db.execute(
+            select(KioskDevice)
+            .where(KioskDevice.kiosko_code == kiosko_code)
+            .options(selectinload(KioskDevice.password))
+        )
+        kiosko = result.scalar_one_or_none()
+        if kiosko is None:
+            raise ValueError("Kiosko no encontrado")
+        if not kiosko.is_active:
+            raise ValueError("Kiosko desactivado")
+        if kiosko.password is None or not verify_password(password, kiosko.password.password_hash):
+            raise ValueError("Credenciales inválidas")
+
+        # Validar suscripción con addon activo
+        store = await self._get_store(kiosko.store_id)
+        if store.organization_id is None:
+            raise ValueError("Tienda sin organización")
+        subscription = await self._get_active_subscription(store.organization_id)
+        addon = await self._get_plan_addon(subscription.plan_id)
+        sub_addon_q = await self.db.execute(
+            select(OrganizationSubscriptionAddon).where(
+                OrganizationSubscriptionAddon.subscription_id == subscription.id,
+                OrganizationSubscriptionAddon.addon_id == addon.id,
+                OrganizationSubscriptionAddon.is_active.is_(True),
+                OrganizationSubscriptionAddon.quantity > 0,
+            )
+        )
+        if sub_addon_q.scalar_one_or_none() is None:
+            raise ValueError("Suscripción sin addon de kiosko activo")
+
+        tokens = self._build_tokens(kiosko)
+        return kiosko, tokens
+
+    @staticmethod
+    def _build_tokens(kiosko: KioskDevice) -> dict:
+        require_change = bool(kiosko.password.require_change) if kiosko.password else False
+        token_data = {
+            "sub": str(kiosko.id),
+            "is_kiosko": True,
+            "kiosko_id": str(kiosko.id),
+            "kiosko_code": kiosko.kiosko_code,
+            "store_id": str(kiosko.store_id),
+            "owner_user_id": str(kiosko.owner_user_id) if kiosko.owner_user_id else None,
+            "require_password_change": require_change,
+        }
+        return {
+            "access_token": create_access_token(token_data),
+            "refresh_token": create_refresh_token(token_data),
+            "token_type": "bearer",
+            "require_password_change": require_change,
+        }
 
     async def change_password(self, kiosko_id: UUID, *, current_password: str, new_password: str) -> KioskDevice:
         """Usado desde el kiosko al hacer cambio obligatorio de password."""

@@ -283,3 +283,19 @@ class KioskoPasswordResetResponse(BaseModel):
     kiosko_id: UUID
     kiosko_code: str
     temp_password: str
+
+
+class KioskoLoginRequest(BaseModel):
+    kiosko_code: str
+    password: str
+
+
+class KioskoTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    kiosko_id: UUID
+    kiosko_code: str
+    store_id: UUID
+    owner_user_id: UUID | None
+    require_password_change: bool

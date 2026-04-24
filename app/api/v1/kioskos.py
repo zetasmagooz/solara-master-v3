@@ -8,7 +8,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db, require_permission
+from app.dependencies import get_current_kiosko, get_current_user, get_db, require_permission
+from app.models.kiosk import KioskDevice
 from app.models.user import User
 from app.schemas.kiosk import (
     KioskoChangePasswordRequest,
@@ -133,21 +134,21 @@ async def reset_kiosko_password(
     )
 
 
-@router.post("/{kiosko_id}/change-password", response_model=KioskoResponse)
-async def change_kiosko_password(
-    kiosko_id: UUID,
+@router.post("/me/change-password", response_model=KioskoResponse)
+async def change_own_password(
     data: KioskoChangePasswordRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_kiosko: Annotated[KioskDevice, Depends(get_current_kiosko)],
 ):
-    """Cambio de password desde el propio kiosko (primer login obligatorio).
+    """Cambio de password desde el propio kiosko usando su JWT.
 
-    No requiere JWT — el kiosko aún no tiene uno válido (require_change=true). Valida
-    conociendo la password actual.
+    El JWT del kiosko tiene `require_password_change=true` en el primer login;
+    al llamar a este endpoint con ambas contraseñas, se limpia el flag.
     """
     service = KioskoAddonService(db)
     try:
         kiosko = await service.change_password(
-            kiosko_id,
+            current_kiosko.id,
             current_password=data.current_password,
             new_password=data.new_password,
         )

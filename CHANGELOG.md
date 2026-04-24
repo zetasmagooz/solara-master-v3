@@ -2,6 +2,17 @@
 
 ## 2026-04-24
 
+### feat(kiosko-addon): Fase 2 — login del kiosko con JWT propio
+- **`POST /auth/kiosko-login`**: recibe `kiosko_code` + `password`. Valida kiosko activo, suscripción con addon `kiosko` activo (`is_active=true` y `quantity > 0`), y password matching contra `kiosko_passwords.password_hash`. Retorna JWT con claims:
+  - `sub` = `kiosko_id`, `is_kiosko=true`, `kiosko_id`, `kiosko_code`, `store_id`, `owner_user_id`, `require_password_change`.
+- **`KioskoAddonService.authenticate(...)`**: método central de autenticación + emisión de tokens. Usa `create_access_token` / `create_refresh_token` existentes (RS256).
+- **Dependency `get_current_kiosko`** en `app/dependencies.py`: decodifica JWT, valida `is_kiosko=true`, carga `KioskDevice` + `password` asociado. Usable en endpoints que espera el propio kiosko autenticado.
+- **`POST /kioskos/me/change-password`** (reemplaza `/kioskos/{id}/change-password`): ahora requiere JWT del propio kiosko. Flujo de primer login:
+  1. Login con temp_password → JWT con `require_password_change=true`.
+  2. Llamada a `/me/change-password` con `current_password` + `new_password`.
+  3. Re-login emite nuevo JWT con `require_password_change=false`.
+- **Validado end-to-end** en `scripts/smoke_kiosko_login.py`: crea kiosko → login temp → change-password → re-login → password vieja rechazada (401).
+
 ### feat(kiosko-addon): Fase 1 — endpoints de gestión de kioskos
 - **Nuevo router `/kioskos`** (distinto al `/kiosk` de órdenes). Endpoints:
   - `POST /kioskos` (permiso `kiosko:contratar`): genera `kiosko_code` consecutivo por store (`K001`, `K002`…) con lock `FOR UPDATE`, crea password temporal (8 chars alfanum) con `require_change=true`, incrementa `quantity` en `organization_subscription_addons` (o crea la fila si es el primero). Retorna `temp_password` (mostrar una vez al owner).
