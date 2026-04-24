@@ -2,6 +2,19 @@
 
 ## 2026-04-24
 
+### feat(kiosko-addon): Fase 1 — endpoints de gestión de kioskos
+- **Nuevo router `/kioskos`** (distinto al `/kiosk` de órdenes). Endpoints:
+  - `POST /kioskos` (permiso `kiosko:contratar`): genera `kiosko_code` consecutivo por store (`K001`, `K002`…) con lock `FOR UPDATE`, crea password temporal (8 chars alfanum) con `require_change=true`, incrementa `quantity` en `organization_subscription_addons` (o crea la fila si es el primero). Retorna `temp_password` (mostrar una vez al owner).
+  - `GET /kioskos?store_id=...&include_inactive=false` (permiso `kiosko:ver`): lista por store.
+  - `GET /kioskos/count?store_id=...`: solo conteo activo. Sin permiso especial — se usa para gate de visibilidad del módulo en frontend.
+  - `GET /kioskos/{id}` (permiso `kiosko:ver`): detalle + flag `require_password_change`.
+  - `PATCH /kioskos/{id}` (permiso `kiosko:editar`): cambia `device_name` y `is_active`. Activar/desactivar ajusta `quantity` del addon automáticamente.
+  - `POST /kioskos/{id}/reset-password` (permiso `kiosko:reset_pwd`): regenera password temporal, fuerza cambio.
+  - `POST /kioskos/{id}/change-password` (sin JWT): cambio obligatorio en primer login; requiere password actual + nueva (mín. 6 chars).
+- **Nuevo servicio `KioskoAddonService`** (`app/services/kiosko_addon_service.py`): CRUD + gestión de passwords + sincronización del addon en la suscripción.
+- **Nuevos schemas** en `app/schemas/kiosk.py`: `KioskoCreateRequest`, `KioskoCreateResponse`, `KioskoUpdateRequest`, `KioskoResponse`, `KioskoPasswordResetResponse`, `KioskoChangePasswordRequest`.
+- **Script smoke**: `scripts/smoke_kioskos.py` valida create/list/reset/update contra DEV.
+
 ### feat(kiosko-addon): Fase 0 — schema para módulo Kiosko contratable
 - **Nueva tabla `plan_addons`**: catálogo de addons por plan (ahora con `kiosko`). Campos: `plan_id`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`. UNIQUE(`plan_id`, `addon_type`). Seed idempotente en `app/seeds/seed_plan_addons.py` — precio global 149 MXN/kiosko (editable desde backoffice).
 - **Nueva tabla `organization_subscription_addons`**: addons contratados por cada suscripción. Campos: `subscription_id`, `addon_id`, `quantity`, `unit_price`, `is_active`. Index por `subscription_id`.

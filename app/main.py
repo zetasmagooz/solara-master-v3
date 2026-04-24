@@ -46,6 +46,7 @@ OPENAPI_TAGS = [
     {"name": "dashboard", "description": "Dashboard: métricas en tiempo real, resumen de ventas del día"},
     {"name": "reports", "description": "Reportes: reportes organizacionales, análisis de ventas"},
     {"name": "kiosk", "description": "Kiosko: catálogo público, creación de órdenes self-service"},
+    {"name": "kioskos", "description": "Kioskos contratables: alta/baja, passwords, addon en suscripción"},
     {"name": "sync", "description": "Sincronización: datos iniciales para kiosko (productos, categorías)"},
     {"name": "organizations", "description": "Organizaciones: gestión de empresa, módulos (almacén, restaurante), defaults"},
     {"name": "subscriptions", "description": "Suscripciones: planes, trial, activación, estado actual"},

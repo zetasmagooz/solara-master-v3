@@ -238,3 +238,48 @@ class KioskPromotionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Gestión de Kioskos contratables (Fase 1 addon) ─────────
+
+class KioskoCreateRequest(BaseModel):
+    store_id: UUID
+    device_name: str | None = None
+
+
+class KioskoUpdateRequest(BaseModel):
+    device_name: str | None = None
+    is_active: bool | None = None
+
+
+class KioskoChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class KioskoResponse(BaseModel):
+    id: UUID
+    store_id: UUID
+    owner_user_id: UUID | None
+    kiosko_code: str | None
+    kiosko_number: int | None
+    device_code: str
+    device_name: str | None
+    is_active: bool
+    last_sync_at: datetime | None
+    created_at: datetime
+    require_password_change: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class KioskoCreateResponse(BaseModel):
+    """Respuesta al crear un kiosko. Incluye password temporal (se muestra una vez)."""
+    kiosko: KioskoResponse
+    temp_password: str
+
+
+class KioskoPasswordResetResponse(BaseModel):
+    kiosko_id: UUID
+    kiosko_code: str
+    temp_password: str
