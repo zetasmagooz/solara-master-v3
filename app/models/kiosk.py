@@ -43,7 +43,7 @@ class KioskOrder(Base):
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200))
     order_type: Mapped[str | None] = mapped_column(String(20), default="dine_in")
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(30), default="pending")
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     tax: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
@@ -52,6 +52,10 @@ class KioskOrder(Base):
     local_id: Mapped[str | None] = mapped_column(String(100))
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    # Cobros pendientes en caja (pago en caja desde kiosko)
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    sale_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sales.id"))
 
     items: Mapped[list["KioskOrderItem"]] = relationship(back_populates="kiosk_order", cascade="all, delete-orphan")
 

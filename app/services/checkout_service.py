@@ -227,9 +227,11 @@ class CheckoutService:
 
         # Cash sales as movements
         # Sub-query: detect free sale items (product_id IS NULL)
+        # Una venta es "libre" si tiene al menos un item sin product_id Y sin combo_id
+        # (un combo tiene product_id=NULL pero combo_id seteado — no es venta libre).
         free_sale_ids_stmt = (
             select(SaleItem.sale_id)
-            .where(SaleItem.product_id.is_(None))
+            .where(SaleItem.product_id.is_(None), SaleItem.combo_id.is_(None))
             .distinct()
         )
         free_sale_ids = set(

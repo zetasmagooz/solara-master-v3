@@ -4,12 +4,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.schemas.kiosk import (
     DeviceLoginRequest,
     DeviceRegisterRequest,
     DeviceTokenResponse,
+    KioskOrderCollectRequest,
+    KioskOrderCollectResponse,
     KioskOrderCreate,
+    KioskOrderDetailedResponse,
     KioskOrderResponse,
     KioskOrderStatusResponse,
 )
@@ -99,3 +103,62 @@ async def get_order_status(
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     return order
+
+
+# --------------------------------------------------------------------
+# Cobros pendientes en caja (POS solarax-app)
+# --------------------------------------------------------------------
+
+@router.get("/pending-orders", response_model=list[KioskOrderDetailedResponse])
+async def list_pending_orders(
+    store_id: Annotated[UUID, Query()],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Lista las órdenes del kiosko pendientes de cobro en caja.
+
+    Consumido por el POS (solarax-app) para mostrar la bandeja de cobros pendientes.
+    """
+    service = KioskService(db)
+    return await service.list_pending_orders(store_id)
+
+
+@router.get("/orders/{order_id}/detail", response_model=KioskOrderDetailedResponse)
+async def get_order_detail(
+    order_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Detalle completo de una orden del kiosko (con items resueltos)."""
+    service = KioskService(db)
+    result = await service.get_order_detailed(order_id)
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    return result
+
+
+@router.post("/orders/{order_id}/collect", response_model=KioskOrderCollectResponse)
+async def collect_pending_order(
+    order_id: UUID,
+    data: KioskOrderCollectRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Cobra una orden pendiente del kiosko creando la Sale final.
+
+    El cajero puede agregar `extra_items` si el cliente pide productos
+    adicionales en la caja. Todo se consolida en una única Sale.
+    """
+    service = KioskService(db)
+    return await service.collect_order(order_id, data, user_id=current_user.id)
+
+
+@router.post("/orders/{order_id}/cancel", response_model=KioskOrderStatusResponse)
+async def cancel_pending_order(
+    order_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Cancela una orden del kiosko pendiente de cobro."""
+    service = KioskService(db)
+    return await service.cancel_order(order_id, user_id=current_user.id)

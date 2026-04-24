@@ -2,6 +2,30 @@
 
 ## 2026-04-23
 
+### feat(kiosk): cobro desde POS con cart editable + Sale completa en respuesta
+- **`KioskOrderCollectRequest.items`** (opcional): lista completa final del cart del cajero. Si viene, reemplaza los items originales de la `KioskOrder`. Permite al POS editar/agregar/quitar productos antes de cobrar.
+- Bifurcación en `KioskService.collect_order`:
+  - Si `items` viene → modo **override**: usa solo esos items, recalcula subtotal.
+  - Si no → modo **cobro rápido**: usa items originales + `extra_items` (comportamiento previo).
+- **`KioskOrderCollectResponse.sale`** ahora incluye la Sale completa serializada (con items y payments) → el POS puede alimentar el printer y la pantalla de confirmación sin un round-trip extra.
+
+### feat(kiosk): cobros pendientes en caja (pago en caja desde kiosko self-service)
+- **Modelo `KioskOrder`**: nuevos campos `collected_at`, `collected_by_user_id` (FK `users`), `sale_id` (FK `sales`); `status` ampliado a `VARCHAR(30)` para soportar `pending_cashier`.
+- **Migración**: `l6m7n8o9p0q1_add_kiosk_pending_cashier.py` + índice `ix_kiosk_orders_status_store`.
+- **Servicio `KioskService.create_kiosk_order`** bifurca por `payment_method`:
+  - `pending_cashier` → crea `KioskOrder` + items con `status='pending_cashier'`, **no crea Sale**, emite evento WS `pending_order_created` al room del store.
+  - Resto (card/transfer/etc.) → flujo actual (crea Sale + Payment, status=`completed`).
+- **Nuevos métodos de servicio**: `list_pending_orders(store_id)`, `get_order_detailed(order_id)`, `collect_order(order_id, data, user_id)`, `cancel_order(order_id, user_id)`.
+- **Endpoints REST** (auth JWT):
+  - `GET /api/v1/kiosk/pending-orders?store_id=X` — lista órdenes pendientes con items detallados (incluye `product_name`, `variant_name`).
+  - `GET /api/v1/kiosk/orders/{id}/detail` — detalle completo.
+  - `POST /api/v1/kiosk/orders/{id}/collect` — cajero cobra: crea Sale + Payment (items originales + extras opcionales del cajero), marca orden como `completed`, emite WS `pending_order_collected`.
+  - `POST /api/v1/kiosk/orders/{id}/cancel` — cancela orden pendiente, emite WS `pending_order_cancelled`.
+- **WebSocket** nuevo endpoint `/ws/kiosk/orders?store_id=X` (archivo `app/api/v1/ws_kiosk_orders.py`) + manager `kiosk_orders_manager` (`app/services/kiosk_orders_ws_manager.py`).
+- **Schemas**: `KioskOrderDetailedResponse`, `KioskOrderItemDetailedResponse`, `KioskOrderCollectRequest`, `KioskOrderExtraItem`, `KioskOrderCollectResponse`.
+
+
+
 ### feat(inventory-ia): endpoints batch para ajuste multi-producto con cantidades individuales
 - `POST /inventory/ia/preview-batch` y `POST /inventory/ia/apply-batch` — aceptan `{ action, items: [{product_id, quantity}], source_scope?, source_id? }`. Permiten ajustar N productos con cantidades diferentes en una sola operación (ej. sumar 5 huevos, 10 cafés, 3 galletas).
 - `source_scope` (`product`/`category`/`brand`) y `source_id` son opcionales — se usan solo para auditoría del `reason` del ajuste cuando los productos vinieron pre-filtrados desde una categoría o marca.

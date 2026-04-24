@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.api.v1.ws_ecartpay import router as ws_router
 from app.api.v1.ws_kiosk_sync import router as ws_kiosk_router
+from app.api.v1.ws_kiosk_orders import router as ws_kiosk_orders_router
 from app.config import settings
 
 # ── Logging ──
@@ -83,6 +84,7 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ws_router, prefix="/ws")
 app.include_router(ws_kiosk_router, prefix="/ws")
+app.include_router(ws_kiosk_orders_router, prefix="/ws")
 
 
 @app.get("/health", tags=["health"])
