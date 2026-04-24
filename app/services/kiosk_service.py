@@ -284,7 +284,7 @@ class KioskService:
             )
 
             sale_service = SaleService(self.db)
-            sale = await sale_service.create_sale(sale_data, user_id=None)
+            sale = await sale_service.create_sale(sale_data, user_id=None, kiosko_id=device_id)
 
             if sale.sale_number:
                 order.local_id = sale.sale_number
@@ -434,7 +434,8 @@ class KioskService:
         )
 
         sale_service = SaleService(self.db)
-        sale = await sale_service.create_sale(sale_data, user_id=user_id)
+        # kiosko_id = origen de la orden; user_id = cajero que cobra
+        sale = await sale_service.create_sale(sale_data, user_id=user_id, kiosko_id=order.device_id)
 
         order.status = STATUS_COMPLETED
         order.payment_method = payment_method

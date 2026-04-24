@@ -36,16 +36,23 @@ class SaleService:
         count = result.scalar() or 0
         return f"TKT-{year}-{count + 1:04d}"
 
-    async def create_sale(self, data: SaleCreate, user_id: UUID | None = None) -> Sale:
+    async def create_sale(self, data: SaleCreate, user_id: UUID | None = None, kiosko_id: UUID | None = None) -> Sale:
         sale_number = await self._generate_sale_number(data.store_id)
 
         # Obtener weather snapshot (no bloquea si falla)
         weather_service = WeatherService(self.db)
         weather_snapshot_id = await weather_service.get_or_fetch_snapshot(data.store_id)
 
+        if user_id is None and kiosko_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="La venta debe tener user_id o kiosko_id. No puede ser ambos NULL.",
+            )
+
         sale = Sale(
             store_id=data.store_id,
             user_id=user_id,
+            kiosko_id=kiosko_id,
             customer_id=data.customer_id,
             sale_number=sale_number,
             subtotal=data.subtotal,

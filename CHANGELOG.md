@@ -2,6 +2,13 @@
 
 ## 2026-04-24
 
+### feat(kiosko-addon): Fase 3 — atribución de ventas con `Sale.kiosko_id`
+- **`SaleService.create_sale(data, user_id=None, kiosko_id=None)`**: nuevo parámetro `kiosko_id`. Valida que al menos uno de los dos esté presente (refleja el CHECK constraint). Setea ambos en la Sale creada.
+- **`KioskService.create_kiosk_order`** (flujo tarjeta/transfer directo): ahora pasa `kiosko_id=device_id` al crear la Sale. Resultado: `Sale.user_id=NULL`, `Sale.kiosko_id=<device>`.
+- **`KioskService.collect_order`** (cajero cobra pending): ahora pasa `kiosko_id=order.device_id` además de `user_id=cajero`. Resultado: `Sale.user_id=<cajero>`, `Sale.kiosko_id=<kiosko origen>`. Trazabilidad completa del origen de la orden aunque el cobro lo haga un humano.
+- **Reportes existentes**: los filtros `Sale.user_id == X` excluyen NULL automáticamente — ventas de kiosko no aparecen en reportes "por cajero X" (correcto: no son de ningún humano). Para listados globales del store siguen contando.
+- **Verificado end-to-end** en `scripts/smoke_kiosko_sale.py`: venta tarjeta → `user_id=NULL, kiosko_id=set`; pago en caja → `user_id=cajero, kiosko_id=origen`.
+
 ### feat(kiosko-addon): Fase 2 — login del kiosko con JWT propio
 - **`POST /auth/kiosko-login`**: recibe `kiosko_code` + `password`. Valida kiosko activo, suscripción con addon `kiosko` activo (`is_active=true` y `quantity > 0`), y password matching contra `kiosko_passwords.password_hash`. Retorna JWT con claims:
   - `sub` = `kiosko_id`, `is_kiosko=true`, `kiosko_id`, `kiosko_code`, `store_id`, `owner_user_id`, `require_password_change`.
