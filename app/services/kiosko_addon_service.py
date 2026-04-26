@@ -121,6 +121,18 @@ class KioskoAddonService:
         )
         return int(result.scalar_one() or 0)
 
+    async def _sync_stripe(self, organization_id: UUID, addon_id: UUID) -> None:
+        """Best-effort: sincroniza el addon en la suscripción Stripe.
+        No falla la operación si Stripe no está configurado o falla la red.
+        """
+        from app.services.stripe_billing import StripeBillingService
+
+        try:
+            await StripeBillingService(self.db).sync_addon_quantity(organization_id, addon_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"[KioskoAddon] Stripe sync falló (no bloqueante): {e}")
+
     async def create_kiosko(
         self,
         *,
@@ -183,6 +195,7 @@ class KioskoAddonService:
             sub_addon.unit_price = addon.price
 
         await self.db.flush()
+        await self._sync_stripe(store.organization_id, addon.id)
         return kiosko, temp_password
 
     async def update_kiosko(self, kiosko_id: UUID, *, device_name: str | None = None, is_active: bool | None = None) -> KioskDevice:
@@ -306,6 +319,8 @@ class KioskoAddonService:
             sub_addon.quantity -= 1
             if sub_addon.quantity == 0:
                 sub_addon.is_active = False
+            await self.db.flush()
+            await self._sync_stripe(store.organization_id, addon.id)
 
     async def _increment_addon_for(self, kiosko: KioskDevice) -> None:
         store = await self._get_store(kiosko.store_id)
@@ -332,3 +347,5 @@ class KioskoAddonService:
         else:
             sub_addon.quantity += 1
             sub_addon.is_active = True
+        await self.db.flush()
+        await self._sync_stripe(store.organization_id, addon.id)

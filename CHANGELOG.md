@@ -2,6 +2,16 @@
 
 ## 2026-04-25
 
+### feat(kiosko-addon): Fase 4 — sincronización con Stripe (subscription items)
+- **`StripeBillingService._ensure_addon_price(addon)`**: garantiza un Stripe Price activo para el `PlanAddon`. Si el monto cambió, desactiva el viejo y crea uno nuevo (los Stripe Prices son inmutables). Reutiliza el Stripe Product buscando por `metadata.addon_id` para evitar duplicados.
+- **`StripeBillingService.sync_addon_quantity(organization_id, addon_id)`**: lee la `quantity` de `organization_subscription_addons` y aplica al SubscriptionItem correspondiente:
+  - Crea el item si no existía (`always_invoice` proration).
+  - Actualiza la quantity si cambió.
+  - Elimina el item si quantity=0 / addon desactivado (`create_prorations`).
+- **`KioskoAddonService`**: invoca `_sync_stripe()` (best-effort, no bloquea) tras cada `create_kiosko`, `_increment_addon_for`, `_decrement_addon_for`. Falla silenciosa con log si Stripe no está configurado.
+- **Backoffice `update_plan_addon`**: si el precio cambia → recrea Stripe Price y propaga la nueva tarifa (`unit_price`) a todas las suscripciones que tienen el addon activo, haciendo `sync_addon_quantity` para cada una.
+- **Smoke test verificado**: contracts/decrements no fallan aunque Stripe no esté configurado o el customer no tenga suscripción Stripe activa todavía (caso "trial sin método de pago").
+
 ### feat(backoffice): endpoints para gestión de plan_addons + breakdown de suscripción
 - **`GET /backoffice/plan-addons`**: lista todos los addons (kiosko etc.) por plan con:
   - `plan_id`, `plan_slug`, `plan_name`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`.

@@ -2312,15 +2312,52 @@ class BackofficeService:
         return addons
 
     async def update_plan_addon(self, addon_id: uuid.UUID, data: dict) -> dict | None:
-        """Actualiza precio / nombre / activo del addon."""
+        """Actualiza precio / nombre / activo del addon. Si el precio cambia, recrea el
+        Stripe Price y propaga la nueva tarifa a todas las suscripciones con el addon activo.
+        """
         addon = (await self.db.execute(select(PlanAddon).where(PlanAddon.id == addon_id))).scalar_one_or_none()
         if not addon:
             return None
+
+        old_price = float(addon.price)
         for key, value in data.items():
             if value is not None and hasattr(addon, key):
                 setattr(addon, key, value)
+        new_price = float(addon.price)
         await self.db.flush()
-        return {"status": "ok", "id": str(addon.id)}
+
+        price_changed = abs(old_price - new_price) > 0.01
+        if price_changed:
+            try:
+                from app.services.stripe_billing import StripeBillingService
+
+                stripe_svc = StripeBillingService(self.db)
+                # Recrea el Stripe Price con el nuevo unit_amount
+                await stripe_svc._ensure_addon_price(addon)
+
+                # Propaga el nuevo precio a las suscripciones activas y re-sync Stripe
+                rows = (await self.db.execute(
+                    select(OrganizationSubscriptionAddon, OrganizationSubscription)
+                    .join(OrganizationSubscription, OrganizationSubscription.id == OrganizationSubscriptionAddon.subscription_id)
+                    .where(
+                        OrganizationSubscriptionAddon.addon_id == addon.id,
+                        OrganizationSubscriptionAddon.is_active.is_(True),
+                        OrganizationSubscriptionAddon.quantity > 0,
+                    )
+                )).all()
+                for sub_addon, sub in rows:
+                    sub_addon.unit_price = new_price
+                    await self.db.flush()
+                    try:
+                        await stripe_svc.sync_addon_quantity(sub.organization_id, addon.id)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(f"[update_plan_addon] sync Stripe falló: {e}")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[update_plan_addon] Stripe price update falló: {e}")
+
+        return {"status": "ok", "id": str(addon.id), "price_changed": price_changed}
 
     async def get_org_subscription_breakdown(self, org_id: uuid.UUID) -> dict | None:
         """Breakdown del costo mensual: plan + addons + tiendas extras."""
