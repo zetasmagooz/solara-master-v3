@@ -108,6 +108,33 @@ class BowPlanResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Plan Addons ──────────────────────────────────────────
+
+class BowPlanAddonResponse(BaseModel):
+    id: uuid.UUID
+    plan_id: uuid.UUID
+    plan_slug: str
+    plan_name: str
+    addon_type: str
+    name: str
+    description: str | None = None
+    price: float
+    stripe_price_id: str | None = None
+    is_active: bool
+    contracted_count: int = 0  # cuántas suscripciones lo tienen activo
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class BowUpdatePlanAddonRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+    stripe_price_id: str | None = None
+    is_active: bool | None = None
+
+
 # ── Pagos / Facturas ────────────────────────────────────
 
 class BowPaymentResponse(BaseModel):

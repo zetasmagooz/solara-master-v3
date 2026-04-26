@@ -23,7 +23,7 @@ from app.models.organization import Organization
 from app.models.sale import Payment, Sale
 from app.models.stripe import StripeInvoice, StripeSubscription
 from app.models.store import Store
-from app.models.subscription import OrganizationSubscription, Plan
+from app.models.subscription import OrganizationSubscription, OrganizationSubscriptionAddon, Plan, PlanAddon
 from app.models.user import Password, Person, Role, User, UserRolePermission
 from app.services.warehouse_service import ensure_warehouse_for_plan
 
@@ -2259,4 +2259,138 @@ class BackofficeService:
             "message": f"Cuenta restaurada con plan {plan.name} ({trial_days} días de trial)",
             "user_id": user.id,
             "new_subscription_id": new_sub.id,
+        }
+
+    # ── Plan Addons ──────────────────────────────────────────
+
+    async def list_plan_addons(self) -> list[dict]:
+        """Lista addons de planes con conteo de suscripciones que los tienen activos."""
+        result = await self.db.execute(
+            select(
+                PlanAddon,
+                Plan.slug.label("plan_slug"),
+                Plan.name.label("plan_name"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (OrganizationSubscriptionAddon.is_active.is_(True))
+                                & (OrganizationSubscriptionAddon.quantity > 0),
+                                OrganizationSubscriptionAddon.quantity,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("contracted_count"),
+            )
+            .join(Plan, Plan.id == PlanAddon.plan_id)
+            .outerjoin(
+                OrganizationSubscriptionAddon,
+                OrganizationSubscriptionAddon.addon_id == PlanAddon.id,
+            )
+            .group_by(PlanAddon.id, Plan.slug, Plan.name, Plan.sort_order)
+            .order_by(Plan.sort_order, PlanAddon.addon_type)
+        )
+        addons = []
+        for row in result.all():
+            addon = row[0]
+            addons.append({
+                "id": addon.id,
+                "plan_id": addon.plan_id,
+                "plan_slug": row.plan_slug,
+                "plan_name": row.plan_name,
+                "addon_type": addon.addon_type,
+                "name": addon.name,
+                "description": addon.description,
+                "price": float(addon.price),
+                "stripe_price_id": addon.stripe_price_id,
+                "is_active": addon.is_active,
+                "contracted_count": int(row.contracted_count or 0),
+                "created_at": addon.created_at,
+            })
+        return addons
+
+    async def update_plan_addon(self, addon_id: uuid.UUID, data: dict) -> dict | None:
+        """Actualiza precio / nombre / activo del addon."""
+        addon = (await self.db.execute(select(PlanAddon).where(PlanAddon.id == addon_id))).scalar_one_or_none()
+        if not addon:
+            return None
+        for key, value in data.items():
+            if value is not None and hasattr(addon, key):
+                setattr(addon, key, value)
+        await self.db.flush()
+        return {"status": "ok", "id": str(addon.id)}
+
+    async def get_org_subscription_breakdown(self, org_id: uuid.UUID) -> dict | None:
+        """Breakdown del costo mensual: plan + addons + tiendas extras."""
+        sub = (await self.db.execute(
+            select(OrganizationSubscription)
+            .where(
+                OrganizationSubscription.organization_id == org_id,
+                OrganizationSubscription.status.in_(["trial", "active"]),
+            )
+            .order_by(OrganizationSubscription.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if sub is None:
+            return None
+
+        plan = (await self.db.execute(select(Plan).where(Plan.id == sub.plan_id))).scalar_one()
+
+        # Addons activos en la suscripción
+        addon_rows = (await self.db.execute(
+            select(OrganizationSubscriptionAddon, PlanAddon)
+            .join(PlanAddon, PlanAddon.id == OrganizationSubscriptionAddon.addon_id)
+            .where(
+                OrganizationSubscriptionAddon.subscription_id == sub.id,
+                OrganizationSubscriptionAddon.is_active.is_(True),
+                OrganizationSubscriptionAddon.quantity > 0,
+            )
+        )).all()
+        addons = []
+        addons_total = 0.0
+        for sub_addon, plan_addon in addon_rows:
+            line_total = float(sub_addon.unit_price) * sub_addon.quantity
+            addons_total += line_total
+            addons.append({
+                "addon_id": str(plan_addon.id),
+                "addon_type": plan_addon.addon_type,
+                "name": plan_addon.name,
+                "quantity": sub_addon.quantity,
+                "unit_price": float(sub_addon.unit_price),
+                "subtotal": line_total,
+            })
+
+        # Tiendas extras (price_per_additional_store en features)
+        free_stores = int((plan.features or {}).get("free_stores", 0) or 0)
+        extra_store_price = float((plan.features or {}).get("price_per_additional_store", 0) or 0)
+        store_count = (await self.db.execute(
+            select(func.count(Store.id)).where(Store.organization_id == org_id, Store.is_active.is_(True))
+        )).scalar_one() or 0
+        extra_stores = max(0, int(store_count) - free_stores)
+        extra_stores_total = extra_stores * extra_store_price
+
+        plan_total = float(plan.price_monthly)
+        grand_total = plan_total + addons_total + extra_stores_total
+
+        return {
+            "subscription_id": str(sub.id),
+            "status": sub.status,
+            "plan": {
+                "id": str(plan.id),
+                "slug": plan.slug,
+                "name": plan.name,
+                "price_monthly": plan_total,
+            },
+            "addons": addons,
+            "addons_total": addons_total,
+            "extra_stores": {
+                "free_included": free_stores,
+                "active_count": int(store_count),
+                "extras": extra_stores,
+                "unit_price": extra_store_price,
+                "subtotal": extra_stores_total,
+            },
+            "monthly_total": grand_total,
         }

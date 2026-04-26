@@ -1,5 +1,17 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-25
+
+### feat(backoffice): endpoints para gestión de plan_addons + breakdown de suscripción
+- **`GET /backoffice/plan-addons`**: lista todos los addons (kiosko etc.) por plan con:
+  - `plan_id`, `plan_slug`, `plan_name`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`.
+  - `contracted_count`: suma de `quantity` activos en `organization_subscription_addons` (cuántos kioskos están realmente contratados a través de este addon).
+- **`PATCH /backoffice/plan-addons/{addon_id}`**: actualiza `name`, `description`, `price`, `stripe_price_id`, `is_active`. Genera audit log.
+- **`GET /backoffice/organizations/{org_id}/subscription-breakdown`**: breakdown del costo mensual real:
+  - Plan base + lista de addons activos (con `quantity`, `unit_price`, `subtotal` por addon) + tiendas extras.
+  - `monthly_total` agregado con todos los conceptos.
+- Schemas nuevos en `app/schemas/backoffice.py`: `BowPlanAddonResponse`, `BowUpdatePlanAddonRequest`.
+
 ## 2026-04-24
 
 ### feat(kiosko-addon): Fase 3 — atribución de ventas con `Sale.kiosko_id`
