@@ -59,17 +59,29 @@ class KioskoAddonService:
         return sub
 
     async def _get_plan_addon(self, plan_id: UUID) -> PlanAddon:
-        result = await self.db.execute(
+        """Override por plan tiene prioridad; si no, addon global (plan_id NULL)."""
+        # Override por plan
+        per_plan = (await self.db.execute(
             select(PlanAddon).where(
                 PlanAddon.plan_id == plan_id,
                 PlanAddon.addon_type == KIOSKO_ADDON_TYPE,
                 PlanAddon.is_active.is_(True),
             )
-        )
-        addon = result.scalar_one_or_none()
-        if addon is None:
-            raise ValueError("El plan actual no ofrece el addon kiosko")
-        return addon
+        )).scalar_one_or_none()
+        if per_plan is not None:
+            return per_plan
+
+        # Global (precio único)
+        global_addon = (await self.db.execute(
+            select(PlanAddon).where(
+                PlanAddon.plan_id.is_(None),
+                PlanAddon.addon_type == KIOSKO_ADDON_TYPE,
+                PlanAddon.is_active.is_(True),
+            )
+        )).scalar_one_or_none()
+        if global_addon is None:
+            raise ValueError("No hay addon kiosko configurado")
+        return global_addon
 
     async def _next_kiosko_number(self, store_id: UUID) -> int:
         """Siguiente número consecutivo para este store. Lock con FOR UPDATE para evitar race."""

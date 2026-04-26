@@ -112,9 +112,9 @@ class BowPlanResponse(BaseModel):
 
 class BowPlanAddonResponse(BaseModel):
     id: uuid.UUID
-    plan_id: uuid.UUID
-    plan_slug: str
-    plan_name: str
+    plan_id: uuid.UUID | None = None  # NULL = addon global
+    plan_slug: str | None = None
+    plan_name: str | None = None
     addon_type: str
     name: str
     description: str | None = None
@@ -128,10 +128,11 @@ class BowPlanAddonResponse(BaseModel):
 
 
 class BowUpdatePlanAddonRequest(BaseModel):
+    """stripe_price_id NO se acepta del frontend: el backoffice lo gestiona automáticamente
+    creando/actualizando el Stripe Product/Price cuando cambia el precio."""
     name: str | None = None
     description: str | None = None
     price: float | None = None
-    stripe_price_id: str | None = None
     is_active: bool | None = None
 
 
