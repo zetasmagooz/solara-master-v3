@@ -246,6 +246,7 @@ class CatalogService:
         low_stock: bool = False,
         is_favorite: bool | None = None,
         subcategory_id: UUID | None = None,
+        attr_option_ids: list[UUID] | None = None,
     ):
         stmt = select(Product).where(Product.store_id == store_id)
 
@@ -273,6 +274,38 @@ class CatalogService:
             stmt = stmt.where(Product.stock <= Product.min_stock)
         if is_favorite is not None:
             stmt = stmt.where(Product.is_favorite == is_favorite)
+
+        # Filtrado por valores de atributo (variant_option_ids).
+        # Las opciones se agrupan por VariantGroup. Dentro de un grupo: OR
+        # (cualquier opción seleccionada vale). Entre grupos: AND (debe haber
+        # al menos una variante del producto que cumpla con todos los grupos).
+        if attr_option_ids:
+            opts_by_group_stmt = select(VariantOption.id, VariantOption.variant_group_id).where(
+                VariantOption.id.in_(attr_option_ids)
+            )
+            opts_by_group_rows = (await self.db.execute(opts_by_group_stmt)).all()
+            grouped: dict[UUID, list[UUID]] = {}
+            for opt_id, group_id in opts_by_group_rows:
+                grouped.setdefault(group_id, []).append(opt_id)
+
+            for group_id, option_ids in grouped.items():
+                # EXISTS subquery: producto tiene alguna variante activa con un
+                # combination_value en este grupo cuyo option_id esté entre los seleccionados.
+                exists_stmt = (
+                    select(ProductVariant.id)
+                    .join(
+                        VariantCombinationValue,
+                        VariantCombinationValue.product_variant_id == ProductVariant.id,
+                    )
+                    .where(
+                        ProductVariant.product_id == Product.id,
+                        ProductVariant.is_active.is_(True),
+                        VariantCombinationValue.variant_group_id == group_id,
+                        VariantCombinationValue.variant_option_id.in_(option_ids),
+                    )
+                    .exists()
+                )
+                stmt = stmt.where(exists_stmt)
 
         # Count total
         count_stmt = select(func.count()).select_from(stmt.subquery())

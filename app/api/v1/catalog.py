@@ -388,16 +388,29 @@ async def list_products(
     low_stock: bool = False,
     is_favorite: bool | None = None,
     subcategory_id: UUID | None = None,
+    attr_options: str | None = Query(
+        None,
+        description="UUIDs de variant_option separados por coma; filtra productos con al menos una variante que coincida (AND entre grupos, OR dentro)",
+    ),
 ):
-    """Lista productos paginados con filtros opcionales (busqueda, categoria, marca, stock bajo, favoritos).
+    """Lista productos paginados con filtros opcionales (busqueda, categoria, marca, stock bajo, favoritos, atributos).
 
     **Ejemplo curl:**
     ```bash
-    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/products?store_id={store_id}&page=1&per_page=20&search=coca" \\
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/products?store_id={store_id}&page=1&per_page=20&search=coca&attr_options={uuid1},{uuid2}" \\
       -H "Authorization: Bearer {token}"
     ```
     """
     service = CatalogService(db)
+    parsed_options: list[UUID] | None = None
+    if attr_options:
+        try:
+            parsed_options = [UUID(s.strip()) for s in attr_options.split(",") if s.strip()]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="attr_options must be a comma-separated list of UUIDs",
+            )
     return await service.get_products_paginated(
         store_id,
         page=page,
@@ -409,6 +422,7 @@ async def list_products(
         low_stock=low_stock,
         is_favorite=is_favorite,
         subcategory_id=subcategory_id,
+        attr_option_ids=parsed_options,
     )
 
 
