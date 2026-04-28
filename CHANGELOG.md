@@ -2,6 +2,13 @@
 
 ## 2026-04-27
 
+### feat(catalog): endpoint para crear variante explícita (estilo Shopify)
+
+- **Nuevo `POST /catalog/products/{product_id}/variants`** que recibe `options: dict[group_uuid → option_uuid]` + price/stock/sku/cost. Crea **una** `ProductVariant` con sus `VariantCombinationValue` por dimensión y marca `Product.has_variants=true` automáticamente.
+- A diferencia de `generate-combinations` (cartesiano), este endpoint permite el flujo "agrego una fila a la vez" donde el dueño elige las opciones (Tamaño=1L) y le asigna stock/precio/SKU propios — más natural para apps tipo POS.
+- Validaciones: producto existe, cada `(group_id, option_id)` es válido y la opción pertenece al grupo, no exista otra variante activa con la misma firma → 400 si duplicado.
+- Schema nuevo `ExplicitVariantCreate` y service method `CatalogService.create_explicit_variant`.
+
 ### feat(catalog): scoping opcional de atributos por categoría (Fase 8)
 
 - **Migración `p0q1r2s3t4u5`**: nuevo campo `attribute_definitions.applicable_category_ids` (JSONB nullable). `null` o `[]` = aplica a todas las categorías; con UUIDs solo aplica a esos.

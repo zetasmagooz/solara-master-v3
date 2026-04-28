@@ -364,6 +364,20 @@ class ProductVariantResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Variante explícita (una fila por combinación) ---
+class ExplicitVariantCreate(BaseModel):
+    """Crea una variante específica con sus dimensiones y stock/precio propios."""
+    options: dict[UUID, UUID]  # variant_group_id → variant_option_id
+    sku: str | None = None
+    barcode: str | None = None
+    price: float
+    cost_price: float | None = None
+    stock: float = 0
+    min_stock: float = 0
+    max_stock: float | None = None
+    can_return_to_inventory: bool = True
+
+
 # --- Combinaciones multi-dimensión ---
 class GenerateCombinationsDimension(BaseModel):
     """Una dimensión a usar al generar combinaciones (un atributo-variante con sus opciones)."""

@@ -629,6 +629,92 @@ class CatalogService:
     def _combination_signature(values) -> tuple:
         return tuple(sorted((v.variant_group_id, v.variant_option_id) for v in values))
 
+    async def create_explicit_variant(
+        self,
+        product_id: UUID,
+        options: dict[UUID, UUID],
+        *,
+        price: float,
+        cost_price: float | None = None,
+        stock: float = 0,
+        min_stock: float = 0,
+        max_stock: float | None = None,
+        sku: str | None = None,
+        barcode: str | None = None,
+        can_return_to_inventory: bool = True,
+    ) -> ProductVariant:
+        """Crea una variante explícita: el caller especifica qué opción de qué grupo
+        compone la combinación. Set Product.has_variants=True automáticamente.
+
+        Validaciones:
+        - El producto existe.
+        - Cada (group_id, option_id) es válido y la opción pertenece al grupo.
+        - No exista otra variante activa con la misma firma de opciones.
+        """
+        if not options:
+            raise ValueError("options cannot be empty")
+
+        prod = (
+            await self.db.execute(select(Product).where(Product.id == product_id))
+        ).scalar_one_or_none()
+        if not prod:
+            raise ValueError("product not found")
+
+        # Validar que cada option pertenezca a su group
+        for group_id, option_id in options.items():
+            opt = (
+                await self.db.execute(
+                    select(VariantOption).where(
+                        VariantOption.id == option_id,
+                        VariantOption.variant_group_id == group_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if not opt:
+                raise ValueError(f"option {option_id} not in group {group_id}")
+
+        # Detectar duplicado
+        existing = (
+            await self.db.execute(
+                select(ProductVariant)
+                .where(ProductVariant.product_id == product_id)
+                .options(selectinload(ProductVariant.combination_values))
+            )
+        ).scalars().all()
+        new_sig = tuple(sorted(options.items()))
+        for v in existing:
+            sig = tuple(sorted((cv.variant_group_id, cv.variant_option_id) for cv in v.combination_values))
+            if sig == new_sig and v.is_active:
+                raise ValueError("a variant with the same options already exists")
+
+        pv = ProductVariant(
+            product_id=product_id,
+            price=price,
+            cost_price=cost_price,
+            stock=stock,
+            min_stock=min_stock,
+            max_stock=max_stock,
+            sku=sku,
+            barcode=barcode,
+            can_return_to_inventory=can_return_to_inventory,
+            is_active=True,
+        )
+        self.db.add(pv)
+        await self.db.flush()
+        for group_id, option_id in options.items():
+            self.db.add(
+                VariantCombinationValue(
+                    product_variant_id=pv.id,
+                    variant_group_id=group_id,
+                    variant_option_id=option_id,
+                )
+            )
+        if not prod.has_variants:
+            prod.has_variants = True
+        await self.db.flush()
+        await self.db.refresh(pv, ["combination_values", "variant_option"])
+        return pv
+
     async def get_variant_matrix(self, product_id: UUID) -> dict:
         """Devuelve la matriz de variantes de un producto: dimensiones (atributos
         usados) + lista de variantes con sus combinaciones planas."""

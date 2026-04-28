@@ -22,6 +22,7 @@ from app.schemas.catalog import (
     CategoryResponse,
     CategoryUpdate,
     CategoryWithSubcategories,
+    ExplicitVariantCreate,
     GenerateCombinationsRequest,
     PaginatedResponse,
     ProductAttributeCreate,
@@ -1132,6 +1133,42 @@ async def generate_product_combinations(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return created
+
+
+@router.post(
+    "/products/{product_id}/variants",
+    response_model=ProductVariantResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_explicit_product_variant(
+    product_id: UUID,
+    data: ExplicitVariantCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Crea una variante específica del producto con sus dimensiones explícitas.
+
+    A diferencia de generate-combinations (cartesiano), aquí el caller decide
+    UNA combinación con su stock/precio/SKU propios. Útil para flujos tipo Shopify
+    donde el dueño agrega una fila a la vez (ej. Coca 1L stock 10 / Coca 2L stock 5).
+    """
+    service = CatalogService(db)
+    try:
+        pv = await service.create_explicit_variant(
+            product_id,
+            options=data.options,
+            price=data.price,
+            cost_price=data.cost_price,
+            stock=data.stock,
+            min_stock=data.min_stock,
+            max_stock=data.max_stock,
+            sku=data.sku,
+            barcode=data.barcode,
+            can_return_to_inventory=data.can_return_to_inventory,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return pv
 
 
 @router.get("/products/{product_id}/variant-matrix", response_model=VariantMatrixResponse)
