@@ -2,6 +2,13 @@
 
 ## 2026-04-28
 
+### fix(catalog): selectinload de subcategorías filtra inactivas
+
+`get_categories(include_subcategories=True)` cargaba todas las subcategorías relacionadas vía `selectinload`, sin filtrar `is_active`. Tras el dedup (one-shot), las subcategorías soft-deleted seguían viajando en el response y aparecían como duplicadas en la app.
+
+- **Fix**: se agregó `with_loader_criteria(Subcategory, Subcategory.is_active.is_(True))` al `.options()` para que el eager-load filtre inactivas en la misma query, sin tocar el resto del flujo.
+- **Smoke contra DEV**: tienda principal y almacén devuelven exactamente las mismas categorías con sus subcategorías sin duplicados.
+
 ### chore(catalog): deduplicación de catálogos org-scoped (one-shot)
 
 Tras la Fase 9 (catálogos a nivel org), las copias que cada tienda tenía aparecieron N veces. Esta migración hace cleanup determinista.

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, with_loader_criteria
 
 from app.config import settings
 from app.constants.units import UNIT_TYPES, calculate_cost, convert_to_base, get_base_unit
@@ -89,7 +89,13 @@ class CatalogService:
         org_id = await self._resolve_org_id(store_id)
         stmt = select(Category).where(Category.organization_id == org_id, Category.is_active.is_(True)).order_by(Category.sort_order)
         if include_subcategories:
-            stmt = stmt.options(selectinload(Category.subcategories), selectinload(Category.brand))
+            # with_loader_criteria filtra las subcategorías inactivas al cargarlas
+            # via selectinload (de lo contrario aparecen las soft-deleted del dedup).
+            stmt = stmt.options(
+                selectinload(Category.subcategories),
+                selectinload(Category.brand),
+                with_loader_criteria(Subcategory, Subcategory.is_active.is_(True), include_aliases=True),
+            )
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
