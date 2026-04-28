@@ -11,6 +11,7 @@ from app.models.inventory import InventoryMovement
 from app.models.organization import Organization
 from app.models.store import Store
 from app.models.subscription import Plan
+from app.models.variant import ProductVariant, VariantCombinationValue
 from app.models.supply import Supply
 from app.models.user import User
 from app.models.warehouse import (
@@ -404,6 +405,7 @@ class WarehouseService:
 
         for item_data in items_data:
             product_id = item_data["product_id"]
+            variant_id = item_data.get("variant_id")
             quantity = item_data["quantity"]
 
             # Obtener producto del almacén
@@ -416,15 +418,39 @@ class WarehouseService:
             if not source_product:
                 continue
 
-            # Validar stock
-            if float(source_product.stock or 0) < quantity:
+            # Cargar variante origen si aplica
+            source_variant = None
+            if variant_id:
+                vres = await self.db.execute(
+                    select(ProductVariant)
+                    .where(ProductVariant.id == variant_id)
+                    .options(selectinload(ProductVariant.combination_values))
+                )
+                source_variant = vres.scalar_one_or_none()
+                if not source_variant or source_variant.product_id != source_product.id:
+                    raise ValueError(
+                        f"Variante {variant_id} no pertenece al producto '{source_product.name}'"
+                    )
+
+            # Validar stock (variante o producto base)
+            if source_variant:
+                available = float(source_variant.stock or 0)
+                label = f"{source_product.name} (variante)"
+            else:
+                available = float(source_product.stock or 0)
+                label = source_product.name
+
+            if available < quantity:
                 raise ValueError(
-                    f"Stock insuficiente para '{source_product.name}': "
-                    f"disponible {float(source_product.stock or 0)}, solicitado {quantity}"
+                    f"Stock insuficiente para '{label}': "
+                    f"disponible {available}, solicitado {quantity}"
                 )
 
-            # Restar stock del almacén
-            source_product.stock = float(source_product.stock or 0) - quantity
+            # Restar stock del almacén (variante o producto base)
+            if source_variant:
+                source_variant.stock = available - quantity
+            else:
+                source_product.stock = available - quantity
 
             # Buscar producto en tienda destino por sku, barcode, transferencia previa o nombre
             target_product = None
@@ -620,11 +646,71 @@ class WarehouseService:
                     )
                     self.db.add(new_img)
 
+            # Si la transferencia es por variante: resolver/crear variante target
+            target_variant = None
+            if source_variant and target_product:
+                # Las variant_options son globales por org → mismos IDs en target
+                source_sig = sorted(
+                    (cv.variant_group_id, cv.variant_option_id)
+                    for cv in source_variant.combination_values
+                )
+                # Buscar variante existente en target_product con misma firma
+                tvres = await self.db.execute(
+                    select(ProductVariant)
+                    .where(ProductVariant.product_id == target_product.id)
+                    .options(selectinload(ProductVariant.combination_values))
+                )
+                for tv in tvres.scalars().all():
+                    tv_sig = sorted(
+                        (cv.variant_group_id, cv.variant_option_id)
+                        for cv in tv.combination_values
+                    )
+                    if tv_sig == source_sig:
+                        target_variant = tv
+                        break
+
+                if target_variant:
+                    target_variant.stock = float(target_variant.stock or 0) + quantity
+                    if target_variant.is_active is False:
+                        target_variant.is_active = True
+                else:
+                    # Crear variante nueva en target_product con misma firma
+                    target_variant = ProductVariant(
+                        product_id=target_product.id,
+                        price=source_variant.price,
+                        cost_price=source_variant.cost_price,
+                        sku=source_variant.sku,
+                        barcode=source_variant.barcode,
+                        stock=quantity,
+                        min_stock=source_variant.min_stock,
+                        max_stock=source_variant.max_stock,
+                        can_return_to_inventory=source_variant.can_return_to_inventory,
+                        is_active=True,
+                    )
+                    self.db.add(target_variant)
+                    await self.db.flush()
+                    for cv in source_variant.combination_values:
+                        self.db.add(
+                            VariantCombinationValue(
+                                product_variant_id=target_variant.id,
+                                variant_group_id=cv.variant_group_id,
+                                variant_option_id=cv.variant_option_id,
+                            )
+                        )
+                    if not target_product.has_variants:
+                        target_product.has_variants = True
+                    await self.db.flush()
+            elif source_variant and not target_product:
+                # Edge case: target_product debió crearse pero no se pudo. Saltar variante.
+                pass
+
             # Guardar item de transferencia
             transfer_item = WarehouseTransferItem(
                 transfer_id=transfer.id,
                 product_id=product_id,
+                variant_id=variant_id,
                 target_product_id=target_product.id if target_product else None,
+                target_variant_id=target_variant.id if target_variant else None,
                 quantity=quantity,
             )
             self.db.add(transfer_item)

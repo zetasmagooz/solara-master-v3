@@ -47,6 +47,7 @@ class EntryResponse(BaseModel):
 
 class TransferItemCreate(BaseModel):
     product_id: UUID  # producto en almacén
+    variant_id: UUID | None = None  # variante específica (si el producto tiene variantes)
     quantity: float
 
 
@@ -59,8 +60,10 @@ class TransferCreate(BaseModel):
 class TransferItemResponse(BaseModel):
     id: UUID
     product_id: UUID
+    variant_id: UUID | None = None
     product_name: str | None = None
     target_product_id: UUID | None
+    target_variant_id: UUID | None = None
     quantity: float
 
     model_config = {"from_attributes": True}
