@@ -2,6 +2,22 @@
 
 ## 2026-04-28
 
+### chore(catalog): deduplicación de catálogos org-scoped (one-shot)
+
+Tras la Fase 9 (catálogos a nivel org), las copias que cada tienda tenía aparecieron N veces. Esta migración hace cleanup determinista.
+
+- **Migración `r2s3t4u5v6w7`**: para cada tabla (`brands`, `categories`, `subcategories`):
+  - Identifica duplicados por `(organization_id, lower(trim(name)))` (subcats: + `category_id`).
+  - Canónico = el más antiguo por `created_at`, **prefiriendo NO ser del `warehouse_store_id`** (lo que crea el owner desde la tienda principal queda canónico).
+  - Repointa FKs:
+    - `products.brand_id`, `categories.brand_id` (para brands)
+    - `products.category_id`, `subcategories.category_id`, `attribute_definitions.applicable_category_ids` JSONB (para categories)
+    - `products.subcategory_id` (para subcategories)
+  - Soft-delete las duplicadas (`is_active=false`) — reversible si fuese necesario.
+- **No toca** `attribute_definitions` ni `variant_groups` (ya estaban limpios).
+- **Resultado en DEV (Crepas)**: 37 → 9 marcas, 22 → 8 categorías, 36 → 7 subcategorías. 228 productos intactos con sus FKs ya apuntando a los canónicos.
+- **No reversible**: el repoint de FKs es destructivo a nivel referencial. Si se necesitase reversión, restaurar desde backup pre-migración.
+
 ### feat(catalog): catálogos compartidos a nivel organización (Fase 9)
 
 Categorías, marcas y atributos ahora son globales por organización: todas las tiendas/almacenes de un mismo negocio comparten estos catálogos. Productos e insumos siguen siendo por tienda.
