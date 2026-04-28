@@ -22,6 +22,7 @@ from app.schemas.catalog import (
     CategoryResponse,
     CategoryUpdate,
     CategoryWithSubcategories,
+    GenerateCombinationsRequest,
     PaginatedResponse,
     ProductAttributeCreate,
     ProductAttributeResponse,
@@ -31,9 +32,12 @@ from app.schemas.catalog import (
     ProductImageUpload,
     ProductResponse,
     ProductUpdate,
+    ProductVariantResponse,
+    ProductVariantUpdate,
     SubcategoryCreate,
     SubcategoryResponse,
     SubcategoryUpdate,
+    VariantMatrixResponse,
 )
 from app.services.ai_usage_service import consume_ai_usage, get_ai_image_cost, get_plan_features
 from app.services.catalog_service import CatalogService
@@ -1049,7 +1053,10 @@ async def create_attribute_definition(
     ```
     """
     service = CatalogService(db)
-    return await service.create_attribute_definition(store_id, **data.model_dump())
+    try:
+        return await service.create_attribute_definition(store_id, **data.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.patch("/attribute-definitions/{definition_id}", response_model=AttributeDefinitionResponse)
@@ -1070,7 +1077,84 @@ async def update_attribute_definition(
     ```
     """
     service = CatalogService(db)
-    ad = await service.update_attribute_definition(definition_id, **data.model_dump(exclude_unset=True))
+    try:
+        ad = await service.update_attribute_definition(definition_id, **data.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if not ad:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attribute definition not found")
     return ad
+
+
+# --- Variant Combinations (multi-dimensión) ---
+@router.post(
+    "/products/{product_id}/generate-combinations",
+    response_model=list[ProductVariantResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_product_combinations(
+    product_id: UUID,
+    data: GenerateCombinationsRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Genera el producto cartesiano de combinaciones (Color × Talla → 4 variantes).
+
+    Recibe `dimensions=[{variant_group_id, variant_option_ids}]` y crea un ProductVariant
+    + sus VariantCombinationValue por cada combinación nueva. Las combinaciones que ya
+    existen se reactivan si estaban inactivas.
+    """
+    service = CatalogService(db)
+    try:
+        created = await service.generate_variant_combinations(
+            product_id,
+            dimensions=[d.model_dump() for d in data.dimensions],
+            default_price=data.default_price,
+            default_cost_price=data.default_cost_price,
+            default_stock=data.default_stock,
+            default_min_stock=data.default_min_stock,
+            replace_existing=data.replace_existing,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return created
+
+
+@router.get("/products/{product_id}/variant-matrix", response_model=VariantMatrixResponse)
+async def get_product_variant_matrix(
+    product_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Devuelve la matriz de variantes activas de un producto: dimensiones (atributos
+    usados) y la lista de combinaciones con stock/precio/SKU."""
+    service = CatalogService(db)
+    return await service.get_variant_matrix(product_id)
+
+
+@router.patch("/variants/{variant_id}", response_model=ProductVariantResponse)
+async def update_variant(
+    variant_id: UUID,
+    data: ProductVariantUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Actualiza una variante individual (precio, stock, SKU, activo)."""
+    service = CatalogService(db)
+    pv = await service.update_product_variant(variant_id, **data.model_dump(exclude_unset=True))
+    if not pv:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
+    return pv
+
+
+@router.delete("/variants/{variant_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_variant(
+    variant_id: UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Soft-delete (is_active=false) de una variante."""
+    service = CatalogService(db)
+    ok = await service.delete_product_variant(variant_id)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")

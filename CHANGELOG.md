@@ -1,5 +1,31 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-27
+
+### feat(catalog): atributos personalizados con flag `generates_variants` y combinaciones multi-dimensión
+
+Fase 1 (backend) del módulo de Atributos Personalizados + Inventario por Combinación. Permite que cada tienda configure los atributos que aplican a sus productos (Color, Talla, Material, Disco Duro, RAM, etc.) y que los atributos tipo catálogo generen combinaciones de inventario con stock independiente.
+
+- **Migración `o9p0q1r2s3t4`**:
+  - `attribute_definitions.generates_variants` (bool, default false): distingue atributos descriptivos de atributos generadores de variantes.
+  - `variant_groups.attribute_definition_id` (uuid nullable, FK ON DELETE SET NULL): vincula un grupo con su definición origen.
+  - `product_variants.variant_option_id` ahora **nullable** y se eliminó `product_variants_product_id_variant_option_id_key` para soportar variantes multi-dimensión.
+  - Nueva tabla `variant_combination_values` (tabla puente: `product_variant_id`, `variant_group_id`, `variant_option_id`) con UNIQUE `(product_variant_id, variant_group_id)` para garantizar una sola opción por dimensión.
+- **Modelos**: `AttributeDefinition.generates_variants`, `VariantGroup.attribute_definition_id`, `ProductVariant.variant_option_id` opcional, nuevo modelo `VariantCombinationValue` con relaciones.
+- **Service `CatalogService`**:
+  - `_validate_attribute_definition_payload`: si `generates_variants=true`, exige `data_type='select'` y `options.choices` no vacío.
+  - `_sync_variant_group_for_attribute`: al crear/actualizar un atributo generador, mantiene un `VariantGroup` espejo con sus `VariantOption` alineadas a `options.choices`. Si se desactiva la generación, desvincula el grupo (no lo borra para no romper variantes existentes).
+  - `generate_variant_combinations(product_id, dimensions, defaults)`: producto cartesiano de las opciones por dimensión; crea un `ProductVariant` + sus `VariantCombinationValue` por cada combinación nueva. Reactiva combinaciones existentes inactivas. Activa `Product.has_variants=true`.
+  - `get_variant_matrix(product_id)`: devuelve dimensiones (atributos usados) + combinaciones con stock/precio/SKU planos para consumo del frontend.
+- **Endpoints nuevos** (`/api/v1/catalog`):
+  - `POST /products/{id}/generate-combinations` — body: `{dimensions: [{variant_group_id, variant_option_ids}], default_price?, default_cost_price?, default_stock?, default_min_stock?, replace_existing?}`.
+  - `GET /products/{id}/variant-matrix` — matriz con dimensiones y combinaciones.
+  - `PATCH /variants/{variant_id}` — editar precio/stock/SKU/activo de una combinación individual.
+  - `DELETE /variants/{variant_id}` — soft-delete de una combinación.
+- **Schemas Pydantic**: `AttributeDefinitionCreate/Update/Response` actualizados con `generates_variants`. Nuevos: `GenerateCombinationsRequest`, `GenerateCombinationsDimension`, `VariantMatrixResponse`, `VariantMatrixDimension`, `VariantCombinationValueResponse`. `ProductVariantResponse.combination_values` lista las dimensiones de cada variante.
+- **Retrocompatibilidad**: las variantes single-dim existentes (1 producto en DEV: Café americano) siguen funcionando porque `variant_option_id` solo pasó a opcional y no se tocaron sus filas.
+- **Smoke test ejecutado contra DEV**: creación de atributo `Color` con `generates_variants=true` → sincroniza `VariantGroup` automáticamente; `generate_variant_combinations` 2×2 = 4 variantes; `get_variant_matrix` devuelve dimensiones y combinaciones planas. Limpieza OK.
+
 ## 2026-04-25
 
 ### feat(kiosko-addon): Fase 4 — sincronización con Stripe (subscription items)

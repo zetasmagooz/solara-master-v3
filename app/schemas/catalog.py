@@ -50,6 +50,7 @@ class AttributeDefinitionCreate(BaseModel):
     is_required: bool = False
     sort_order: int = 0
     applicable_product_types: dict | None = None
+    generates_variants: bool = False
 
 
 class AttributeDefinitionUpdate(BaseModel):
@@ -59,6 +60,7 @@ class AttributeDefinitionUpdate(BaseModel):
     is_required: bool | None = None
     sort_order: int | None = None
     applicable_product_types: dict | None = None
+    generates_variants: bool | None = None
     is_active: bool | None = None
 
 
@@ -71,6 +73,7 @@ class AttributeDefinitionResponse(BaseModel):
     is_required: bool
     sort_order: int
     applicable_product_types: dict | None = None
+    generates_variants: bool
     is_active: bool
 
     model_config = {"from_attributes": True}
@@ -282,6 +285,7 @@ class VariantGroupResponse(BaseModel):
     id: UUID
     store_id: UUID
     name: str
+    attribute_definition_id: UUID | None = None
     options: list["VariantOptionResponse"] = []
 
     model_config = {"from_attributes": True}
@@ -328,10 +332,19 @@ class ProductVariantUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class VariantCombinationValueResponse(BaseModel):
+    variant_group_id: UUID
+    variant_option_id: UUID
+    group_name: str | None = None
+    option_name: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class ProductVariantResponse(BaseModel):
     id: UUID
     product_id: UUID
-    variant_option_id: UUID
+    variant_option_id: UUID | None = None
     sku: str | None = None
     barcode: str | None = None
     price: float
@@ -343,8 +356,37 @@ class ProductVariantResponse(BaseModel):
     can_return_to_inventory: bool = True
     is_active: bool
     variant_option: VariantOptionResponse | None = None
+    combination_values: list[VariantCombinationValueResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+# --- Combinaciones multi-dimensión ---
+class GenerateCombinationsDimension(BaseModel):
+    """Una dimensión a usar al generar combinaciones (un atributo-variante con sus opciones)."""
+    variant_group_id: UUID
+    variant_option_ids: list[UUID]
+
+
+class GenerateCombinationsRequest(BaseModel):
+    dimensions: list[GenerateCombinationsDimension]
+    default_price: float | None = None
+    default_cost_price: float | None = None
+    default_stock: float = 0
+    default_min_stock: float = 0
+    replace_existing: bool = False
+
+
+class VariantMatrixDimension(BaseModel):
+    variant_group_id: UUID
+    group_name: str
+    options: list[VariantOptionResponse] = []
+
+
+class VariantMatrixResponse(BaseModel):
+    product_id: UUID
+    dimensions: list[VariantMatrixDimension] = []
+    variants: list[ProductVariantResponse] = []
 
 
 # --- Supplies ---

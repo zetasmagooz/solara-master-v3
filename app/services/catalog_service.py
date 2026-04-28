@@ -17,7 +17,12 @@ from app.models.catalog import Brand, Category, Product, ProductImage, Subcatego
 from app.models.combo import Combo, ComboItem
 from app.models.modifier import ModifierGroup, ModifierOption, ProductModifierGroup
 from app.models.supply import ProductSupply, Supply
-from app.models.variant import ProductVariant, VariantGroup, VariantOption
+from app.models.variant import (
+    ProductVariant,
+    VariantCombinationValue,
+    VariantGroup,
+    VariantOption,
+)
 from app.utils.changelog import record_change
 
 
@@ -400,9 +405,11 @@ class CatalogService:
         return result.scalars().all()
 
     async def create_attribute_definition(self, store_id: UUID, **kwargs) -> AttributeDefinition:
+        self._validate_attribute_definition_payload(kwargs)
         ad = AttributeDefinition(store_id=store_id, **kwargs)
         self.db.add(ad)
         await self.db.flush()
+        await self._sync_variant_group_for_attribute(ad)
         return ad
 
     async def update_attribute_definition(self, definition_id: UUID, **kwargs) -> AttributeDefinition | None:
@@ -410,11 +417,258 @@ class CatalogService:
         ad = result.scalar_one_or_none()
         if not ad:
             return None
+        merged = {
+            "data_type": ad.data_type,
+            "options": ad.options,
+            "generates_variants": ad.generates_variants,
+        }
         for key, value in kwargs.items():
             if value is not None:
                 setattr(ad, key, value)
+                if key in merged:
+                    merged[key] = value
+        self._validate_attribute_definition_payload(merged)
         await self.db.flush()
+        await self._sync_variant_group_for_attribute(ad)
         return ad
+
+    @staticmethod
+    def _validate_attribute_definition_payload(payload: dict) -> None:
+        if not payload.get("generates_variants"):
+            return
+        if payload.get("data_type") != "select":
+            raise ValueError("generates_variants requires data_type='select'")
+        options = payload.get("options") or {}
+        choices = options.get("choices") if isinstance(options, dict) else None
+        if not choices:
+            raise ValueError("generates_variants requires options.choices with at least one value")
+
+    async def _sync_variant_group_for_attribute(self, ad: AttributeDefinition) -> VariantGroup | None:
+        """Si el AttributeDefinition genera variantes, mantiene un VariantGroup espejo
+        con sus VariantOption alineadas a options.choices. Si deja de generar variantes,
+        desvincula (no borra) el grupo para no perder histórico."""
+        stmt = select(VariantGroup).where(VariantGroup.attribute_definition_id == ad.id)
+        existing = (await self.db.execute(stmt)).scalar_one_or_none()
+
+        if not ad.generates_variants:
+            if existing:
+                existing.attribute_definition_id = None
+                await self.db.flush()
+            return None
+
+        choices = (ad.options or {}).get("choices") or []
+
+        if existing is None:
+            existing = VariantGroup(
+                store_id=ad.store_id,
+                name=ad.name,
+                attribute_definition_id=ad.id,
+            )
+            self.db.add(existing)
+            await self.db.flush()
+        else:
+            existing.name = ad.name
+
+        opt_stmt = select(VariantOption).where(VariantOption.variant_group_id == existing.id)
+        current_options = {o.name: o for o in (await self.db.execute(opt_stmt)).scalars().all()}
+
+        for idx, choice in enumerate(choices):
+            existing_opt = current_options.pop(choice, None)
+            if existing_opt is None:
+                self.db.add(VariantOption(variant_group_id=existing.id, name=choice, sort_order=idx))
+            else:
+                existing_opt.sort_order = idx
+
+        # Las opciones que ya no están en choices se mantienen para no romper variantes
+        # existentes; el frontend puede filtrar por las que están en choices.
+        await self.db.flush()
+        await self.db.refresh(existing, ["options"])
+        return existing
+
+    # --- Combinaciones multi-dimensión ---
+    async def generate_variant_combinations(
+        self,
+        product_id: UUID,
+        dimensions: list[dict],
+        default_price: float | None = None,
+        default_cost_price: float | None = None,
+        default_stock: float = 0,
+        default_min_stock: float = 0,
+        replace_existing: bool = False,
+    ) -> list[ProductVariant]:
+        """Genera el producto cartesiano de las opciones por dimensión y crea
+        un ProductVariant + VariantCombinationValue por combinación nueva."""
+        from itertools import product as cartesian
+
+        if not dimensions:
+            raise ValueError("dimensions cannot be empty")
+
+        # Cargar producto para fallback de precio
+        prod_stmt = select(Product).where(Product.id == product_id)
+        product = (await self.db.execute(prod_stmt)).scalar_one_or_none()
+        if not product:
+            raise ValueError("product not found")
+
+        price = default_price if default_price is not None else float(product.base_price or 0)
+        cost = default_cost_price if default_cost_price is not None else (
+            float(product.cost_price) if product.cost_price is not None else None
+        )
+
+        # Validar grupos y opciones
+        normalized: list[tuple[UUID, list[UUID]]] = []
+        for dim in dimensions:
+            group_id = dim["variant_group_id"]
+            option_ids = dim.get("variant_option_ids") or []
+            if not option_ids:
+                raise ValueError(f"dimension {group_id} has no options")
+            grp = (await self.db.execute(select(VariantGroup).where(VariantGroup.id == group_id))).scalar_one_or_none()
+            if not grp:
+                raise ValueError(f"variant_group {group_id} not found")
+            valid_opts = (
+                await self.db.execute(
+                    select(VariantOption.id).where(
+                        VariantOption.variant_group_id == group_id,
+                        VariantOption.id.in_(option_ids),
+                    )
+                )
+            ).scalars().all()
+            if len(valid_opts) != len(option_ids):
+                raise ValueError(f"some options for group {group_id} are invalid")
+            normalized.append((group_id, option_ids))
+
+        if replace_existing:
+            existing = (
+                await self.db.execute(
+                    select(ProductVariant).where(ProductVariant.product_id == product_id)
+                )
+            ).scalars().all()
+            for pv in existing:
+                pv.is_active = False
+            await self.db.flush()
+
+        # Mapa de combinaciones existentes (signature → variant) para no duplicar
+        existing_variants = (
+            await self.db.execute(
+                select(ProductVariant)
+                .where(ProductVariant.product_id == product_id)
+                .options(selectinload(ProductVariant.combination_values))
+            )
+        ).scalars().all()
+        existing_sigs = {self._combination_signature(v.combination_values): v for v in existing_variants}
+
+        created: list[ProductVariant] = []
+        groups_in_order = [g for g, _ in normalized]
+        option_lists = [opts for _, opts in normalized]
+
+        for combo in cartesian(*option_lists):
+            sig = tuple(sorted(zip(groups_in_order, combo)))
+            if sig in existing_sigs:
+                # Ya existe esta combinación; reactivar si estaba inactiva
+                existing_sigs[sig].is_active = True
+                continue
+            pv = ProductVariant(
+                product_id=product_id,
+                price=price,
+                cost_price=cost,
+                stock=default_stock,
+                min_stock=default_min_stock,
+                is_active=True,
+            )
+            self.db.add(pv)
+            await self.db.flush()
+            for group_id, option_id in zip(groups_in_order, combo):
+                self.db.add(
+                    VariantCombinationValue(
+                        product_variant_id=pv.id,
+                        variant_group_id=group_id,
+                        variant_option_id=option_id,
+                    )
+                )
+            created.append(pv)
+
+        if created:
+            product.has_variants = True
+
+        await self.db.flush()
+        return created
+
+    @staticmethod
+    def _combination_signature(values) -> tuple:
+        return tuple(sorted((v.variant_group_id, v.variant_option_id) for v in values))
+
+    async def get_variant_matrix(self, product_id: UUID) -> dict:
+        """Devuelve la matriz de variantes de un producto: dimensiones (atributos
+        usados) + lista de variantes con sus combinaciones planas."""
+        variants_stmt = (
+            select(ProductVariant)
+            .where(ProductVariant.product_id == product_id, ProductVariant.is_active.is_(True))
+            .options(
+                selectinload(ProductVariant.variant_option),
+                selectinload(ProductVariant.combination_values).selectinload(VariantCombinationValue.variant_group),
+                selectinload(ProductVariant.combination_values).selectinload(VariantCombinationValue.variant_option),
+            )
+        )
+        variants = (await self.db.execute(variants_stmt)).scalars().all()
+
+        groups: dict[UUID, dict] = {}
+        for v in variants:
+            for cv in v.combination_values:
+                bucket = groups.setdefault(
+                    cv.variant_group_id,
+                    {"variant_group_id": cv.variant_group_id, "group_name": cv.variant_group.name, "options": {}},
+                )
+                bucket["options"].setdefault(cv.variant_option_id, cv.variant_option)
+
+        dimensions = []
+        for g in groups.values():
+            opts = sorted(g["options"].values(), key=lambda o: (o.sort_order, o.name))
+            dimensions.append(
+                {
+                    "variant_group_id": g["variant_group_id"],
+                    "group_name": g["group_name"],
+                    "options": [
+                        {
+                            "id": o.id,
+                            "variant_group_id": o.variant_group_id,
+                            "name": o.name,
+                            "sort_order": o.sort_order,
+                        }
+                        for o in opts
+                    ],
+                }
+            )
+
+        variants_view = []
+        for v in variants:
+            variants_view.append(
+                {
+                    "id": v.id,
+                    "product_id": v.product_id,
+                    "variant_option_id": v.variant_option_id,
+                    "sku": v.sku,
+                    "barcode": v.barcode,
+                    "price": float(v.price) if v.price is not None else 0,
+                    "cost_price": float(v.cost_price) if v.cost_price is not None else None,
+                    "description": v.description,
+                    "stock": float(v.stock) if v.stock is not None else 0,
+                    "min_stock": float(v.min_stock) if v.min_stock is not None else 0,
+                    "max_stock": float(v.max_stock) if v.max_stock is not None else None,
+                    "can_return_to_inventory": v.can_return_to_inventory,
+                    "is_active": v.is_active,
+                    "variant_option": v.variant_option,
+                    "combination_values": [
+                        {
+                            "variant_group_id": cv.variant_group_id,
+                            "variant_option_id": cv.variant_option_id,
+                            "group_name": cv.variant_group.name if cv.variant_group else None,
+                            "option_name": cv.variant_option.name if cv.variant_option else None,
+                        }
+                        for cv in v.combination_values
+                    ],
+                }
+            )
+
+        return {"product_id": product_id, "dimensions": dimensions, "variants": variants_view}
 
     # --- Variant Groups ---
     async def get_variant_groups(self, store_id: UUID):
