@@ -2,6 +2,21 @@
 
 ## 2026-04-28
 
+### feat(catalog): catálogos compartidos a nivel organización (Fase 9)
+
+Categorías, marcas y atributos ahora son globales por organización: todas las tiendas/almacenes de un mismo negocio comparten estos catálogos. Productos e insumos siguen siendo por tienda.
+
+- **Migración `q1r2s3t4u5v6`**: añade `organization_id` (FK NOT NULL) a `categories`, `subcategories`, `brands`, `attribute_definitions`, `variant_groups`. Backfill desde `stores.organization_id`. Crea índice por `organization_id` en cada tabla. **`store_id` queda nullable** (deprecado, se mantiene para compatibilidad y reportes históricos; se podrá dropear más adelante).
+- **Modelos SQLAlchemy** actualizados con `organization_id` NOT NULL en las 5 tablas; `store_id` ahora es opcional.
+- **`CatalogService`**:
+  - Nuevo helper `_resolve_org_id(store_id)`.
+  - `get_categories`, `create_category`, `get_subcategories`, `create_subcategory`, `get_brands`, `create_brand`, `get_attribute_definitions`, `create_attribute_definition`, `get_variant_groups`, `create_variant_group` resuelven la org desde el `store_id` recibido y filtran/persisten por `organization_id`.
+  - `_sync_variant_group_for_attribute` propaga `organization_id` al crear el VariantGroup espejo.
+  - `bulk_import_products`: el helper `_resolve_or_create_by_name` detecta automáticamente si el modelo tiene `organization_id` y filtra por org; subcategorías también.
+- **`SyncService.get_full_catalog`**, **`PricingIaService.search`**, **`InventoryIaService.search`**: ahora filtran categorías/marcas por org (con la sub-query que resuelve `Store.organization_id`).
+- **Endpoints REST sin cambio de contrato**: siguen aceptando `store_id` como query param para compatibilidad. Internamente filtran por org.
+- **Smoke verificado** contra DEV: las 22 categorías, 3 atributos y 37 marcas de Crepas el desarrollador son visibles desde la tienda principal y desde el Almacén con las mismas IDs.
+
 ### feat(catalog): endpoint de disponibilidad cross-store
 
 Para que el cajero pueda saber rápidamente en qué tienda hay stock de un producto.

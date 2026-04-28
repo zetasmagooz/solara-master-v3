@@ -13,7 +13,8 @@ class VariantGroup(Base):
     __tablename__ = "variant_groups"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    store_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=True)  # legacy
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     attribute_definition_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

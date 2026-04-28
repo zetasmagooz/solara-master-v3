@@ -49,6 +49,11 @@ class PricingIAService:
     async def search(
         self, store_id: uuid.UUID, query: str, scope: str | None = None
     ) -> PriceSearchResponse:
+        from app.models.store import Store as _Store
+        _org_id = (
+            await self.db.execute(select(_Store.organization_id).where(_Store.id == store_id))
+        ).scalar_one_or_none()
+
         results: list[PriceSearchResultItem] = []
 
         if scope is None or scope == "product":
@@ -77,7 +82,7 @@ class PricingIAService:
             stmt = (
                 select(Category)
                 .where(
-                    Category.store_id == store_id,
+                    Category.organization_id == _org_id,
                     Category.is_active == True,  # noqa: E712
                     *self._fuzzy_filters(Category.name, query),
                 )
@@ -101,7 +106,7 @@ class PricingIAService:
             stmt = (
                 select(Brand)
                 .where(
-                    Brand.store_id == store_id,
+                    Brand.organization_id == _org_id,
                     Brand.is_active == True,  # noqa: E712
                     *self._fuzzy_filters(Brand.name, query),
                 )

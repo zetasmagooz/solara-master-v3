@@ -14,6 +14,7 @@ from app.config import settings
 from app.constants.units import UNIT_TYPES, calculate_cost, convert_to_base, get_base_unit
 from app.models.attribute import AttributeDefinition, ProductAttribute
 from app.models.catalog import Brand, Category, Product, ProductImage, Subcategory
+from app.models.store import Store
 from app.models.combo import Combo, ComboItem
 from app.models.modifier import ModifierGroup, ModifierOption, ProductModifierGroup
 from app.models.supply import ProductSupply, Supply
@@ -29,6 +30,16 @@ from app.utils.changelog import record_change
 class CatalogService:
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _resolve_org_id(self, store_id: UUID) -> UUID:
+        """Resuelve la organization_id a partir de un store_id. Las categorías,
+        marcas y atributos se persisten/leen a nivel organización (compartidos
+        entre todas las tiendas de la org)."""
+        result = await self.db.execute(select(Store.organization_id).where(Store.id == store_id))
+        org_id = result.scalar_one_or_none()
+        if not org_id:
+            raise ValueError(f"store {store_id} has no organization")
+        return org_id
 
     # --- Generic Image Save ---
     async def _save_image(self, base64_data: str, folder: str, host_url: str) -> str:
@@ -75,14 +86,16 @@ class CatalogService:
 
     # --- Categories ---
     async def get_categories(self, store_id: UUID, include_subcategories: bool = False):
-        stmt = select(Category).where(Category.store_id == store_id, Category.is_active.is_(True)).order_by(Category.sort_order)
+        org_id = await self._resolve_org_id(store_id)
+        stmt = select(Category).where(Category.organization_id == org_id, Category.is_active.is_(True)).order_by(Category.sort_order)
         if include_subcategories:
             stmt = stmt.options(selectinload(Category.subcategories), selectinload(Category.brand))
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
     async def create_category(self, store_id: UUID, **kwargs) -> Category:
-        category = Category(store_id=store_id, **kwargs)
+        org_id = await self._resolve_org_id(store_id)
+        category = Category(organization_id=org_id, store_id=store_id, **kwargs)
         self.db.add(category)
         await self.db.flush()
         await record_change(self.db, store_id, "category", category.id, "create")
@@ -112,7 +125,8 @@ class CatalogService:
 
     # --- Subcategories ---
     async def create_subcategory(self, store_id: UUID, **kwargs) -> Subcategory:
-        subcategory = Subcategory(store_id=store_id, **kwargs)
+        org_id = await self._resolve_org_id(store_id)
+        subcategory = Subcategory(organization_id=org_id, store_id=store_id, **kwargs)
         self.db.add(subcategory)
         await self.db.flush()
         await record_change(self.db, store_id, "subcategory", subcategory.id, "create")
@@ -151,12 +165,14 @@ class CatalogService:
 
     # --- Brands ---
     async def get_brands(self, store_id: UUID):
-        stmt = select(Brand).where(Brand.store_id == store_id, Brand.is_active.is_(True)).order_by(Brand.name)
+        org_id = await self._resolve_org_id(store_id)
+        stmt = select(Brand).where(Brand.organization_id == org_id, Brand.is_active.is_(True)).order_by(Brand.name)
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
     async def create_brand(self, store_id: UUID, **kwargs) -> Brand:
-        brand = Brand(store_id=store_id, **kwargs)
+        org_id = await self._resolve_org_id(store_id)
+        brand = Brand(organization_id=org_id, store_id=store_id, **kwargs)
         self.db.add(brand)
         await self.db.flush()
         return brand
@@ -429,9 +445,10 @@ class CatalogService:
 
     # --- Attribute Definitions ---
     async def get_attribute_definitions(self, store_id: UUID):
+        org_id = await self._resolve_org_id(store_id)
         stmt = (
             select(AttributeDefinition)
-            .where(AttributeDefinition.store_id == store_id, AttributeDefinition.is_active.is_(True))
+            .where(AttributeDefinition.organization_id == org_id, AttributeDefinition.is_active.is_(True))
             .order_by(AttributeDefinition.sort_order)
         )
         result = await self.db.execute(stmt)
@@ -439,7 +456,8 @@ class CatalogService:
 
     async def create_attribute_definition(self, store_id: UUID, **kwargs) -> AttributeDefinition:
         self._validate_attribute_definition_payload(kwargs)
-        ad = AttributeDefinition(store_id=store_id, **kwargs)
+        org_id = await self._resolve_org_id(store_id)
+        ad = AttributeDefinition(organization_id=org_id, store_id=store_id, **kwargs)
         self.db.add(ad)
         await self.db.flush()
         await self._sync_variant_group_for_attribute(ad)
@@ -493,6 +511,7 @@ class CatalogService:
 
         if existing is None:
             existing = VariantGroup(
+                organization_id=ad.organization_id,
                 store_id=ad.store_id,
                 name=ad.name,
                 attribute_definition_id=ad.id,
@@ -901,12 +920,18 @@ class CatalogService:
 
     # --- Variant Groups ---
     async def get_variant_groups(self, store_id: UUID):
-        stmt = select(VariantGroup).where(VariantGroup.store_id == store_id).options(selectinload(VariantGroup.options))
+        org_id = await self._resolve_org_id(store_id)
+        stmt = (
+            select(VariantGroup)
+            .where(VariantGroup.organization_id == org_id)
+            .options(selectinload(VariantGroup.options))
+        )
         result = await self.db.execute(stmt)
         return result.scalars().all()
 
     async def create_variant_group(self, store_id: UUID, name: str) -> VariantGroup:
-        vg = VariantGroup(store_id=store_id, name=name)
+        org_id = await self._resolve_org_id(store_id)
+        vg = VariantGroup(organization_id=org_id, store_id=store_id, name=name)
         self.db.add(vg)
         await self.db.flush()
         await self.db.refresh(vg, ["options"])
@@ -1549,14 +1574,26 @@ class CatalogService:
         extra_filter=None,
         extra_kwargs_fn=None,
     ) -> dict[str, UUID]:
-        """Resolve existing or bulk-create entities by name. Returns {lowercase_name: id}."""
+        """Resolve existing or bulk-create entities by name. Returns {lowercase_name: id}.
+        Para Brand/Category/Subcategory filtra y crea por organization_id (catálogos globales).
+        """
         result_map: dict[str, UUID] = {}
         if not names:
             return result_map
 
+        # Brand/Category/Subcategory son globales por org; Supplier sigue por store
+        is_org_scoped = hasattr(model, "organization_id")
+        scope_filter = None
+        org_id_for_create: UUID | None = None
+        if is_org_scoped:
+            org_id_for_create = await self._resolve_org_id(store_id)
+            scope_filter = model.organization_id == org_id_for_create
+        else:
+            scope_filter = model.store_id == store_id
+
         # Batch fetch all existing in one query
         stmt = select(model).where(
-            model.store_id == store_id,
+            scope_filter,
             func.lower(func.trim(model.name)).in_([n.lower().strip() for n in names]),
             model.is_active.is_(True),
         )
@@ -1571,7 +1608,9 @@ class CatalogService:
         if missing:
             new_entities = []
             for name in missing:
-                kwargs = {"store_id": store_id, "name": name.strip()}
+                kwargs: dict = {"name": name.strip(), "store_id": store_id}
+                if is_org_scoped:
+                    kwargs["organization_id"] = org_id_for_create
                 if extra_kwargs_fn:
                     extra = extra_kwargs_fn(name)
                     if extra is None:
@@ -1622,10 +1661,11 @@ class CatalogService:
                 subcat_pairs[key] = (sub_name, parent_id)
 
         if subcat_pairs:
-            # Fetch all existing subcategories for this store in one query
+            # Fetch all existing subcategories for this org in one query (catálogo global)
+            org_id_local = await self._resolve_org_id(store_id)
             all_sub_names = [v[0].lower().strip() for v in subcat_pairs.values()]
             stmt = select(Subcategory).where(
-                Subcategory.store_id == store_id,
+                Subcategory.organization_id == org_id_local,
                 func.lower(func.trim(Subcategory.name)).in_(all_sub_names),
                 Subcategory.is_active.is_(True),
             )
@@ -1641,7 +1681,14 @@ class CatalogService:
             missing_subs = []
             for key, (sname, pid) in subcat_pairs.items():
                 if key not in subcat_map:
-                    missing_subs.append(Subcategory(store_id=store_id, category_id=pid, name=sname))
+                    missing_subs.append(
+                        Subcategory(
+                            organization_id=org_id_local,
+                            store_id=store_id,
+                            category_id=pid,
+                            name=sname,
+                        )
+                    )
             if missing_subs:
                 self.db.add_all(missing_subs)
                 await self.db.flush()

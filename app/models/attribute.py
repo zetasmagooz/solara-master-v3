@@ -13,7 +13,8 @@ class AttributeDefinition(Base):
     __tablename__ = "attribute_definitions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    store_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=True)  # legacy
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     data_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")  # text, number, boolean, date, select
     options: Mapped[dict | None] = mapped_column(JSONB)  # para select: {"choices": ["Rojo","Azul"]}

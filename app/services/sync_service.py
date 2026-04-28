@@ -18,9 +18,19 @@ class SyncService:
         self.db = db
 
     async def get_full_catalog(self, store_id: UUID) -> dict:
+        # Resolver organization_id para categorías/marcas/atributos (compartidos por org)
+        from app.models.store import Store
+        org_id = (
+            await self.db.execute(select(Store.organization_id).where(Store.id == store_id))
+        ).scalar_one_or_none()
+
         categories = await self.db.execute(
             select(Category)
-            .where(Category.store_id == store_id, Category.is_active.is_(True), Category.show_in_kiosk.is_(True))
+            .where(
+                Category.organization_id == org_id,
+                Category.is_active.is_(True),
+                Category.show_in_kiosk.is_(True),
+            )
             .options(selectinload(Category.subcategories))
             .order_by(Category.sort_order)
         )
