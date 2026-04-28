@@ -364,6 +364,21 @@ class ProductVariantResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# --- Disponibilidad cross-store ---
+class AvailabilityRow(BaseModel):
+    store_id: UUID
+    store_name: str
+    product_id: UUID
+    product_name: str
+    variant_id: UUID | None = None
+    variant_label: str | None = None
+    sku: str | None = None
+    barcode: str | None = None
+    stock: float
+    min_stock: float
+    image_url: str | None = None
+
+
 # --- Variante explícita (una fila por combinación) ---
 class ExplicitVariantCreate(BaseModel):
     """Crea una variante específica con sus dimensiones y stock/precio propios."""

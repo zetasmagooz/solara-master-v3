@@ -629,6 +629,116 @@ class CatalogService:
     def _combination_signature(values) -> tuple:
         return tuple(sorted((v.variant_group_id, v.variant_option_id) for v in values))
 
+    async def get_product_availability(
+        self,
+        organization_id: UUID,
+        query: str,
+        limit: int = 60,
+    ) -> list[dict]:
+        """Busca productos en todas las tiendas de una organización por nombre,
+        SKU o código de barras (incluye SKU/barcode de variantes). Devuelve filas
+        con la tienda, el producto, opcionalmente la variante específica y su
+        stock disponible.
+        """
+        from app.models.store import Store
+
+        pattern = f"%{query}%"
+
+        prod_stmt = (
+            select(Product)
+            .join(Store, Store.id == Product.store_id)
+            .where(
+                Store.organization_id == organization_id,
+                Product.is_active.is_(True),
+                or_(
+                    Product.name.ilike(pattern),
+                    Product.sku.ilike(pattern),
+                    Product.barcode.ilike(pattern),
+                    Product.variants.any(
+                        or_(
+                            ProductVariant.sku.ilike(pattern),
+                            ProductVariant.barcode.ilike(pattern),
+                        )
+                    ),
+                ),
+            )
+            .options(
+                selectinload(Product.variants).selectinload(ProductVariant.variant_option),
+                selectinload(Product.variants)
+                .selectinload(ProductVariant.combination_values)
+                .selectinload(VariantCombinationValue.variant_option),
+                selectinload(Product.images),
+            )
+            .order_by(Product.name)
+            .limit(limit)
+        )
+        products = (await self.db.execute(prod_stmt)).scalars().all()
+
+        store_ids = {p.store_id for p in products}
+        store_rows = (
+            await self.db.execute(select(Store.id, Store.name).where(Store.id.in_(store_ids)))
+        ).all() if store_ids else []
+        store_name_map = {sid: sname for sid, sname in store_rows}
+
+        def _variant_label(v: ProductVariant) -> str | None:
+            if v.combination_values:
+                parts = [
+                    cv.variant_option.name
+                    for cv in v.combination_values
+                    if cv.variant_option is not None and cv.variant_option.name
+                ]
+                if parts:
+                    return " · ".join(parts)
+            if v.variant_option and v.variant_option.name:
+                return v.variant_option.name
+            return None
+
+        def _primary_image_url(p: Product) -> str | None:
+            if not p.images:
+                return None
+            primary = next((i for i in p.images if i.is_primary), p.images[0])
+            return primary.image_url
+
+        rows: list[dict] = []
+        for p in products:
+            image_url = _primary_image_url(p)
+            store_name = store_name_map.get(p.store_id) or ""
+            active_variants = [v for v in (p.variants or []) if v.is_active]
+            if p.has_variants and active_variants:
+                for v in active_variants:
+                    rows.append(
+                        {
+                            "store_id": p.store_id,
+                            "store_name": store_name,
+                            "product_id": p.id,
+                            "product_name": p.name,
+                            "variant_id": v.id,
+                            "variant_label": _variant_label(v),
+                            "sku": v.sku or p.sku,
+                            "barcode": v.barcode or p.barcode,
+                            "stock": float(v.stock or 0),
+                            "min_stock": float(v.min_stock or 0),
+                            "image_url": image_url,
+                        }
+                    )
+            else:
+                rows.append(
+                    {
+                        "store_id": p.store_id,
+                        "store_name": store_name,
+                        "product_id": p.id,
+                        "product_name": p.name,
+                        "variant_id": None,
+                        "variant_label": None,
+                        "sku": p.sku,
+                        "barcode": p.barcode,
+                        "stock": float(p.stock or 0),
+                        "min_stock": float(p.min_stock or 0),
+                        "image_url": image_url,
+                    }
+                )
+        return rows
+
     async def create_explicit_variant(
         self,
         product_id: UUID,

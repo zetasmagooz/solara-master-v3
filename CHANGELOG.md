@@ -1,5 +1,16 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-28
+
+### feat(catalog): endpoint de disponibilidad cross-store
+
+Para que el cajero pueda saber rápidamente en qué tienda hay stock de un producto.
+
+- **Nuevo `GET /api/v1/catalog/availability?store_id=...&q=...`**: busca productos por nombre, SKU o código de barras (incluye SKU/barcode de variantes) en TODAS las tiendas de la organización del usuario. Resuelve la organización a partir del `store_id` enviado y valida que pertenezca al usuario (403 si no).
+- Devuelve filas tipo `AvailabilityRow` con: `store_id`, `store_name`, `product_id`, `product_name`, `variant_id` y `variant_label` (cuando aplica), `sku`, `barcode`, `stock`, `min_stock`, `image_url`.
+- Si el producto tiene variantes activas, devuelve una fila por variante (con su stock individual). Si no, devuelve una fila por producto con su stock base.
+- `CatalogService.get_product_availability(organization_id, query, limit=60)` y schema `AvailabilityRow`.
+
 ## 2026-04-27
 
 ### feat(catalog): endpoint para crear variante explícita (estilo Shopify)

@@ -13,6 +13,7 @@ from app.schemas.catalog import (
     AttributeDefinitionCreate,
     AttributeDefinitionResponse,
     AttributeDefinitionUpdate,
+    AvailabilityRow,
     BrandCreate,
     BrandResponse,
     BrandUpdate,
@@ -1133,6 +1134,32 @@ async def generate_product_combinations(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     return created
+
+
+@router.get("/availability", response_model=list[AvailabilityRow])
+async def list_product_availability(
+    q: Annotated[str, Query(min_length=1, description="Texto a buscar (nombre, SKU o código de barras)")],
+    store_id: Annotated[UUID, Query(description="Tienda de referencia para resolver la organización del usuario")],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    limit: int = Query(60, ge=1, le=200),
+):
+    """Busca productos por nombre/SKU/código de barras (incluye SKU/barcode
+    de variantes) en TODAS las tiendas de la organización del usuario y
+    devuelve la disponibilidad por tienda con el stock actual.
+    """
+    from app.models.store import Store as StoreModel
+
+    ref = (
+        await db.execute(select(StoreModel).where(StoreModel.id == store_id))
+    ).scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Store not found")
+    if ref.organization_id is None or ref.organization_id != current_user.organization_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Store does not belong to your organization")
+
+    service = CatalogService(db)
+    return await service.get_product_availability(ref.organization_id, q.strip(), limit=limit)
 
 
 @router.post(
