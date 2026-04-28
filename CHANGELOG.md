@@ -2,6 +2,14 @@
 
 ## 2026-04-27
 
+### feat(catalog): filtro de productos por valores de atributo (Fase 7)
+
+- **`GET /api/v1/catalog/products`** acepta nuevo query param `attr_options`: lista de UUIDs de `variant_option` separada por coma.
+- **`CatalogService.get_products_paginated`** recibe `attr_option_ids: list[UUID] | None`.
+- **Lógica de filtrado**: las opciones se agrupan por `VariantGroup` mediante una consulta a `variant_options`. Para cada grupo se construye una subquery `EXISTS` que requiere que el producto tenga al menos una `ProductVariant` activa con un `VariantCombinationValue` cuyo `option_id` esté en los seleccionados de ese grupo. Resultado: **OR dentro del mismo atributo, AND entre atributos** (ej. `Color in [Rojo, Azul] AND Talla in [S]`).
+- Si `attr_options` viene mal formado se devuelve 400.
+- Sin atributos seleccionados, el endpoint se comporta exactamente igual que antes (retrocompatible).
+
 ### feat(catalog): atributos personalizados con flag `generates_variants` y combinaciones multi-dimensión
 
 Fase 1 (backend) del módulo de Atributos Personalizados + Inventario por Combinación. Permite que cada tienda configure los atributos que aplican a sus productos (Color, Talla, Material, Disco Duro, RAM, etc.) y que los atributos tipo catálogo generen combinaciones de inventario con stock independiente.
