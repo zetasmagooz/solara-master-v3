@@ -61,6 +61,7 @@ async def sales_summary(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     filter_user_id: UUID | None = Query(default=None),
+    filter_employee_id: UUID | None = Query(default=None),
 ):
     """Retorna resumen de ventas (total, cantidad, promedio) con filtros de fecha y usuario.
 
@@ -75,6 +76,7 @@ async def sales_summary(
         store_id, date_from=date_from, date_to=date_to,
         user_id=user.id, is_owner=user.is_owner,
         filter_user_id=filter_user_id if user.is_owner else None,
+        filter_employee_id=filter_employee_id,
     )
 
 
@@ -88,9 +90,10 @@ async def list_sales(
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
     filter_user_id: UUID | None = Query(default=None),
+    filter_employee_id: UUID | None = Query(default=None),
     customer_id: UUID | None = Query(default=None),
 ):
-    """Lista ventas de una tienda con paginacion y filtros de fecha/usuario/cliente. Owners ven todas.
+    """Lista ventas de una tienda con paginacion y filtros de fecha/usuario/cliente/empleado. Owners ven todas.
 
     **Ejemplo curl:**
     ```bash
@@ -103,6 +106,7 @@ async def list_sales(
         store_id, limit=limit, offset=offset, date_from=date_from, date_to=date_to,
         user_id=user.id, is_owner=user.is_owner,
         filter_user_id=filter_user_id if user.is_owner else None,
+        filter_employee_id=filter_employee_id,
         customer_id=customer_id,
     )
 

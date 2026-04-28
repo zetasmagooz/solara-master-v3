@@ -29,6 +29,7 @@ class Sale(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     kiosko_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id"))
     customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"))
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("employees.id"))
     sale_number: Mapped[str | None] = mapped_column(String(50))
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     tax: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
@@ -72,6 +73,8 @@ class SaleItem(Base):
     tax_rate: Mapped[float | None] = mapped_column(Numeric(5, 2))
     modifiers_json: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     removed_supplies_json: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    commission_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
+    commission_percent: Mapped[float | None] = mapped_column(Numeric(5, 2))
 
     sale: Mapped[Sale] = relationship(back_populates="items")
 

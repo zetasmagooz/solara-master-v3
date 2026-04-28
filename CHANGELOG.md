@@ -2,6 +2,31 @@
 
 ## 2026-04-28
 
+### feat(employees): empleados, comisiones y reporte de nómina (Fases A-D)
+
+Empleados son entidades distintas de Users — no pueden hacer login. Una tienda puede tener N empleados (atienden ventas, ganan sueldo + comisión) y N usuarios (cobran/operan el sistema) totalmente independientes.
+
+- **Migración `t4u5v6w7x8y9`**:
+  - Extiende `employees` (legacy, 0 filas en DEV) con `phone`, `hire_date`, `address`. UNIQUE parcial `(store_id, phone) WHERE phone IS NOT NULL`. Las columnas legacy `name`, `salary` se reusan como `full_name`/`daily_salary` en API.
+  - Nueva `employee_commissions`: regla con `name`, `percent`, `applies_to_all_products`, `sort_order`. Validación service: máximo 3 reglas por empleado.
+  - Nueva `employee_commission_products`: tabla puente cuando la regla aplica solo a un set de productos.
+  - `sales.employee_id` (FK nullable + índice): empleado que atendió. Independiente de `user_id` (cajero que cobró).
+  - `sale_items.commission_amount`, `commission_percent`: precomputed al cerrar la venta para que reportes sean estables aunque las reglas cambien después.
+  - `store_config.commission_base` ('unit_price' default | 'base_price'): controla sobre qué precio se calcula la comisión.
+- **Modelos**: `Employee`, `EmployeeCommission`, `EmployeeCommissionProduct` en `app/models/employee.py`. `Sale.employee_id`, `SaleItem.commission_amount/percent`.
+- **Schemas**: `EmployeeCreate/Update/Response`, `EmployeeCommissionInput/Response`, `EmployeeSalesSummaryResponse` con `top_products`.
+- **Service `EmployeeService`**: CRUD, `set_commissions` (idempotente, valida ≤3 y reglas no vacías), `commission_for_product`, `sales_summary` (sueldo + comisiones + top productos).
+- **`SaleService.create_sale`** acepta `data.employee_id`. Después de crear sale_items llama `_apply_employee_commissions` que:
+  - Resuelve la primera regla matcheante por `sort_order` (con fallback a `applies_to_all_products`).
+  - Lee `store_config.commission_base` para decidir si calcula sobre `unit_price` o `base_price`.
+  - Persiste `commission_amount = base × qty × percent / 100` y `commission_percent` por item.
+  - Si falla, log warning y NO aborta la venta.
+- **Endpoints `/api/v1/employees`**: CRUD + `PUT /{id}/commissions` + `GET /reports/sales-summary?store_id=&start=&end=&employee_id=`.
+- **Filtros aditivos en ventas**: `GET /sales` y `GET /sales/summary` aceptan `filter_employee_id` (junto al ya existente `filter_user_id`).
+- **`SaleResponse.employee_id`** y **`SaleItemResponse.commission_amount/percent`** expuestos para frontend.
+- **Compatibilidad**: ventas históricas con `employee_id=NULL` y `commission_amount=NULL` no rompen reportes (los tratan como "sin empleado / sin comisión"). Cambios de comisión NO retroactivos: las ventas pasadas mantienen su `commission_amount` precomputed.
+- **Smoke contra DEV**: creación de empleado, asignación de comisión, validaciones — todo OK.
+
 ### fix(catalog): selectinload de subcategorías filtra inactivas
 
 `get_categories(include_subcategories=True)` cargaba todas las subcategorías relacionadas vía `selectinload`, sin filtrar `is_active`. Tras el dedup (one-shot), las subcategorías soft-deleted seguían viajando en el response y aparecían como duplicadas en la app.

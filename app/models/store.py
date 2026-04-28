@@ -90,6 +90,8 @@ class StoreConfig(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), unique=True, nullable=False)
     sales_without_stock: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 'unit_price' (default, precio efectivo cobrado) | 'base_price' (precio original del producto)
+    commission_base: Mapped[str] = mapped_column(String(20), default="unit_price", server_default=text("'unit_price'"))
     tax_included: Mapped[bool] = mapped_column(Boolean, default=False)
     sales_sequence_prefix: Mapped[str | None] = mapped_column(String(10))
     kiosk_enabled: Mapped[bool] = mapped_column(Boolean, default=False)

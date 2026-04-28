@@ -53,6 +53,7 @@ class SaleService:
             store_id=data.store_id,
             user_id=user_id,
             kiosko_id=kiosko_id,
+            employee_id=data.employee_id,
             customer_id=data.customer_id,
             sale_number=sale_number,
             subtotal=data.subtotal,
@@ -116,6 +117,19 @@ class SaleService:
 
         await self.db.flush()
 
+        # Calcular comisiones por item si hay employee_id (best-effort, no aborta venta)
+        if data.employee_id:
+            try:
+                await self._apply_employee_commissions(sale.id, data.employee_id, data.store_id)
+            except Exception as exc:  # noqa: BLE001
+                import logging
+                logging.getLogger(__name__).warning(
+                    "commission_calc_failed sale=%s employee=%s err=%s",
+                    sale.id,
+                    data.employee_id,
+                    exc,
+                )
+
         # Incrementar visitas del cliente
         if data.customer_id:
             customer_service = CustomerService(self.db)
@@ -134,6 +148,80 @@ class SaleService:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one()
+
+    async def _apply_employee_commissions(
+        self, sale_id: UUID, employee_id: UUID, store_id: UUID
+    ) -> None:
+        """Calcula y persiste commission_amount/percent en cada SaleItem.
+
+        Lee la configuración StoreConfig.commission_base ('unit_price' por
+        default; 'base_price' si está configurado). Si un item no matchea
+        ninguna comisión del empleado, queda en NULL/0.
+        """
+        from app.models.employee import Employee, EmployeeCommission, EmployeeCommissionProduct
+
+        # Cargar empleado con sus comisiones y productos asociados
+        emp_stmt = (
+            select(Employee)
+            .where(Employee.id == employee_id)
+            .options(
+                selectinload(Employee.commissions).selectinload(EmployeeCommission.products)
+            )
+        )
+        employee = (await self.db.execute(emp_stmt)).scalar_one_or_none()
+        if not employee or not employee.commissions:
+            return
+
+        # Configuración de base de cálculo
+        base_field = "unit_price"
+        cfg = (
+            await self.db.execute(
+                select(StoreConfig.commission_base).where(StoreConfig.store_id == store_id)
+            )
+        ).scalar_one_or_none()
+        if cfg in ("unit_price", "base_price"):
+            base_field = cfg
+
+        # Cargar items de la venta y productos para base_price
+        items_stmt = select(SaleItem).where(SaleItem.sale_id == sale_id)
+        items = list((await self.db.execute(items_stmt)).scalars().all())
+        product_ids = {i.product_id for i in items if i.product_id}
+        product_base_map: dict = {}
+        if base_field == "base_price" and product_ids:
+            rows = (
+                await self.db.execute(
+                    select(Product.id, Product.base_price).where(Product.id.in_(product_ids))
+                )
+            ).all()
+            product_base_map = {pid: float(bp or 0) for pid, bp in rows}
+
+        # Pre-ordenar comisiones por sort_order y construir índice product_id → comisión
+        ordered_commissions = sorted(employee.commissions, key=lambda c: c.sort_order)
+        by_product: dict = {}
+        all_products_commission: EmployeeCommission | None = None
+        for comm in ordered_commissions:
+            if comm.applies_to_all_products and all_products_commission is None:
+                all_products_commission = comm
+                continue
+            for cp in comm.products:
+                # primer match gana
+                by_product.setdefault(cp.product_id, comm)
+
+        for item in items:
+            if not item.product_id:
+                continue
+            comm = by_product.get(item.product_id) or all_products_commission
+            if not comm:
+                continue
+            base_unit = float(item.unit_price or 0)
+            if base_field == "base_price":
+                base_unit = product_base_map.get(item.product_id, base_unit)
+            qty = float(item.quantity or 0)
+            percent = float(comm.percent or 0)
+            item.commission_amount = base_unit * qty * percent / 100
+            item.commission_percent = percent
+
+        await self.db.flush()
 
     async def _deduct_stock(self, product_id: UUID | None, variant_id: UUID | None, quantity: int, store_id: UUID | None = None):
         if not product_id:
@@ -232,6 +320,7 @@ class SaleService:
         user_id: UUID | None = None,
         is_owner: bool = True,
         filter_user_id: UUID | None = None,
+        filter_employee_id: UUID | None = None,
         customer_id: UUID | None = None,
     ):
         stmt = (
@@ -251,6 +340,8 @@ class SaleService:
             stmt = stmt.where(Sale.user_id == user_id)
         if filter_user_id:
             stmt = stmt.where(Sale.user_id == filter_user_id)
+        if filter_employee_id:
+            stmt = stmt.where(Sale.employee_id == filter_employee_id)
         if customer_id:
             stmt = stmt.where(Sale.customer_id == customer_id)
         if date_from:
@@ -276,6 +367,7 @@ class SaleService:
         user_id: UUID | None = None,
         is_owner: bool = True,
         filter_user_id: UUID | None = None,
+        filter_employee_id: UUID | None = None,
     ) -> dict:
         stmt = (
             select(
@@ -314,6 +406,8 @@ class SaleService:
             stmt = stmt.where(Sale.user_id == user_id)
         if filter_user_id:
             stmt = stmt.where(Sale.user_id == filter_user_id)
+        if filter_employee_id:
+            stmt = stmt.where(Sale.employee_id == filter_employee_id)
         if date_from:
             stmt = stmt.where(func.date(func.timezone('America/Mexico_City', Sale.created_at)) >= date_from)
         if date_to:

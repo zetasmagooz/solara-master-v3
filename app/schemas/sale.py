@@ -29,6 +29,7 @@ class PaymentCreate(BaseModel):
 class SaleCreate(BaseModel):
     store_id: UUID
     customer_id: UUID | None = None
+    employee_id: UUID | None = None
     subtotal: float
     tax: float = 0
     discount: float = 0
@@ -62,6 +63,8 @@ class SaleItemResponse(BaseModel):
     tax_rate: float | None = None
     modifiers_json: list[dict] = []
     removed_supplies_json: list[dict] = []
+    commission_amount: float | None = None
+    commission_percent: float | None = None
 
     model_config = {"from_attributes": True}
 
@@ -113,6 +116,7 @@ class SaleResponse(BaseModel):
     store_id: UUID
     user_id: UUID | None = None
     customer_id: UUID | None = None
+    employee_id: UUID | None = None
     sale_number: str | None = None
     subtotal: float
     tax: float
