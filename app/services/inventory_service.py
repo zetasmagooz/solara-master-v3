@@ -275,6 +275,14 @@ class InventoryService:
 
         for item in data.items:
             product_id = uuid.UUID(item.product_id)
+            variant_id_raw = getattr(item, "variant_id", None)
+            variant_uuid: uuid.UUID | None = None
+            if variant_id_raw:
+                variant_uuid = (
+                    variant_id_raw if isinstance(variant_id_raw, uuid.UUID)
+                    else uuid.UUID(str(variant_id_raw))
+                )
+
             result = await self.db.execute(
                 select(Product).where(
                     Product.id == product_id,
@@ -285,7 +293,20 @@ class InventoryService:
             if not product:
                 continue
 
-            previous_stock = float(product.stock or 0)
+            target_variant = None
+            if variant_uuid:
+                vres = await self.db.execute(
+                    select(ProductVariant).where(
+                        ProductVariant.id == variant_uuid,
+                        ProductVariant.product_id == product_id,
+                    )
+                )
+                target_variant = vres.scalar_one_or_none()
+
+            if target_variant:
+                previous_stock = float(target_variant.stock or 0)
+            else:
+                previous_stock = float(product.stock or 0)
 
             if movement == "ingreso":
                 new_stock = previous_stock + item.quantity
@@ -294,20 +315,27 @@ class InventoryService:
             else:  # reemplazo
                 new_stock = item.quantity
 
-            # Actualizar stock
-            product.stock = new_stock
-
-            # Actualizar precios si se proporcionan
-            if item.unit_cost > 0:
-                product.cost_price = item.unit_cost
-            if item.sale_price > 0:
-                product.base_price = item.sale_price
+            # Actualizar stock + precios donde corresponda
+            if target_variant:
+                target_variant.stock = new_stock
+                if item.unit_cost > 0:
+                    target_variant.cost_price = item.unit_cost
+                if item.sale_price > 0:
+                    target_variant.price = item.sale_price
+                display_name = f"{product.name} (variante)"
+            else:
+                product.stock = new_stock
+                if item.unit_cost > 0:
+                    product.cost_price = item.unit_cost
+                if item.sale_price > 0:
+                    product.base_price = item.sale_price
+                display_name = product.name
 
             # Crear item de ajuste
             adj_item = InventoryAdjustmentItem(
                 adjustment_id=adjustment.id,
                 product_id=product_id,
-                variant_id=None,
+                variant_id=variant_uuid,
                 previous_stock=previous_stock,
                 new_stock=new_stock,
             )
@@ -317,7 +345,7 @@ class InventoryService:
 
             response_items.append(InventoryEntryItemResponse(
                 product_id=str(product_id),
-                product_name=product.name,
+                product_name=display_name,
                 quantity=item.quantity,
                 unit_cost=item.unit_cost,
                 sale_price=item.sale_price,

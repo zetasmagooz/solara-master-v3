@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class EntryItemCreate(BaseModel):
     product_id: UUID
+    variant_id: UUID | None = None
     quantity: float
     unit_cost: float = 0
     sale_price: float = 0
@@ -23,6 +24,7 @@ class EntryCreate(BaseModel):
 class EntryItemResponse(BaseModel):
     id: UUID
     product_id: UUID
+    variant_id: UUID | None = None
     product_name: str | None = None
     quantity: float
     unit_cost: float

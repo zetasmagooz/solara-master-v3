@@ -48,6 +48,7 @@ class MovementType(str, Enum):
 
 class InventoryEntryItemCreate(BaseModel):
     product_id: str
+    variant_id: str | None = None
     quantity: float = Field(..., gt=0)
     unit_cost: float = 0
     sale_price: float = 0

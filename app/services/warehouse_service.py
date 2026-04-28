@@ -295,6 +295,7 @@ class WarehouseService:
 
         for item_data in items_data:
             product_id = item_data["product_id"]
+            variant_id = item_data.get("variant_id")
             quantity = item_data["quantity"]
             unit_cost = item_data.get("unit_cost", 0)
             sale_price = item_data.get("sale_price", 0)
@@ -303,29 +304,49 @@ class WarehouseService:
             entry_item = WarehouseEntryItem(
                 entry_id=entry.id,
                 product_id=product_id,
+                variant_id=variant_id,
                 quantity=quantity,
                 unit_cost=unit_cost,
             )
             self.db.add(entry_item)
 
-            # Ajustar stock según tipo de movimiento
-            result = await self.db.execute(
-                select(Product).where(Product.id == product_id)
-            )
-            product = result.scalar_one_or_none()
-            if product:
-                current_stock = float(product.stock or 0)
-                if movement_type == "egreso":
-                    product.stock = max(0, current_stock - quantity)
-                elif movement_type == "reemplazo":
-                    product.stock = quantity
-                else:  # ingreso
-                    product.stock = current_stock + quantity
+            # Ajustar stock: si tiene variant_id ajusta variant.stock; sino product.stock
+            target_variant = None
+            if variant_id:
+                vres = await self.db.execute(
+                    select(ProductVariant).where(ProductVariant.id == variant_id)
+                )
+                target_variant = vres.scalar_one_or_none()
 
+            if target_variant:
+                current_stock = float(target_variant.stock or 0)
+                if movement_type == "egreso":
+                    target_variant.stock = max(0, current_stock - quantity)
+                elif movement_type == "reemplazo":
+                    target_variant.stock = quantity
+                else:  # ingreso
+                    target_variant.stock = current_stock + quantity
                 if unit_cost > 0:
-                    product.cost_price = unit_cost
+                    target_variant.cost_price = unit_cost
                 if sale_price > 0:
-                    product.base_price = sale_price
+                    target_variant.price = sale_price
+            else:
+                result = await self.db.execute(
+                    select(Product).where(Product.id == product_id)
+                )
+                product = result.scalar_one_or_none()
+                if product:
+                    current_stock = float(product.stock or 0)
+                    if movement_type == "egreso":
+                        product.stock = max(0, current_stock - quantity)
+                    elif movement_type == "reemplazo":
+                        product.stock = quantity
+                    else:  # ingreso
+                        product.stock = current_stock + quantity
+                    if unit_cost > 0:
+                        product.cost_price = unit_cost
+                    if sale_price > 0:
+                        product.base_price = sale_price
 
             total_cost += quantity * unit_cost
             total_items += 1
