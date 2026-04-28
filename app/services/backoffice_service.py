@@ -23,7 +23,7 @@ from app.models.organization import Organization
 from app.models.sale import Payment, Sale
 from app.models.stripe import StripeInvoice, StripeSubscription
 from app.models.store import Store
-from app.models.subscription import OrganizationSubscription, Plan
+from app.models.subscription import OrganizationSubscription, OrganizationSubscriptionAddon, Plan, PlanAddon
 from app.models.user import Password, Person, Role, User, UserRolePermission
 from app.services.warehouse_service import ensure_warehouse_for_plan
 
@@ -2259,4 +2259,197 @@ class BackofficeService:
             "message": f"Cuenta restaurada con plan {plan.name} ({trial_days} días de trial)",
             "user_id": user.id,
             "new_subscription_id": new_sub.id,
+        }
+
+    # ── Plan Addons ──────────────────────────────────────────
+
+    async def list_plan_addons(self) -> list[dict]:
+        """Lista addons (globales + overrides por plan) con conteo de suscripciones activas."""
+        result = await self.db.execute(
+            select(
+                PlanAddon,
+                Plan.slug.label("plan_slug"),
+                Plan.name.label("plan_name"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                (OrganizationSubscriptionAddon.is_active.is_(True))
+                                & (OrganizationSubscriptionAddon.quantity > 0),
+                                OrganizationSubscriptionAddon.quantity,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ).label("contracted_count"),
+            )
+            .outerjoin(Plan, Plan.id == PlanAddon.plan_id)
+            .outerjoin(
+                OrganizationSubscriptionAddon,
+                OrganizationSubscriptionAddon.addon_id == PlanAddon.id,
+            )
+            .group_by(PlanAddon.id, Plan.slug, Plan.name, Plan.sort_order)
+            .order_by(Plan.sort_order.nullsfirst(), PlanAddon.addon_type)
+        )
+        addons = []
+        for row in result.all():
+            addon = row[0]
+            addons.append({
+                "id": addon.id,
+                "plan_id": addon.plan_id,
+                "plan_slug": row.plan_slug,
+                "plan_name": row.plan_name,
+                "addon_type": addon.addon_type,
+                "name": addon.name,
+                "description": addon.description,
+                "price": float(addon.price),
+                "stripe_price_id": addon.stripe_price_id,
+                "is_active": addon.is_active,
+                "contracted_count": int(row.contracted_count or 0),
+                "created_at": addon.created_at,
+            })
+        return addons
+
+    async def update_plan_addon(self, addon_id: uuid.UUID, data: dict) -> dict | None:
+        """Actualiza nombre / descripción / precio / activo del addon.
+
+        El backoffice NO acepta `stripe_price_id`: lo genera/actualiza automáticamente
+        creando el Stripe Product (si no existe) y el Stripe Price con el nuevo monto.
+        Si el precio cambia, propaga la nueva tarifa a todas las suscripciones activas
+        haciendo `sync_addon_quantity` para cada una (proration_behavior='always_invoice').
+        """
+        addon = (await self.db.execute(select(PlanAddon).where(PlanAddon.id == addon_id))).scalar_one_or_none()
+        if not addon:
+            return None
+
+        old_price = float(addon.price)
+        old_stripe_price_id = addon.stripe_price_id
+        # No permitir override manual de stripe_price_id
+        data.pop("stripe_price_id", None)
+
+        for key, value in data.items():
+            if value is not None and hasattr(addon, key):
+                setattr(addon, key, value)
+        new_price = float(addon.price)
+        await self.db.flush()
+
+        price_changed = abs(old_price - new_price) > 0.01
+        needs_stripe_price = price_changed or not old_stripe_price_id
+
+        if needs_stripe_price:
+            try:
+                from app.services.stripe_billing import StripeBillingService
+
+                stripe_svc = StripeBillingService(self.db)
+                # Crea/actualiza el Stripe Price; persiste addon.stripe_price_id
+                await stripe_svc._ensure_addon_price(addon)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[update_plan_addon] Stripe price ensure falló: {e}")
+
+        if price_changed:
+            try:
+                from app.services.stripe_billing import StripeBillingService
+
+                stripe_svc = StripeBillingService(self.db)
+                rows = (await self.db.execute(
+                    select(OrganizationSubscriptionAddon, OrganizationSubscription)
+                    .join(OrganizationSubscription, OrganizationSubscription.id == OrganizationSubscriptionAddon.subscription_id)
+                    .where(
+                        OrganizationSubscriptionAddon.addon_id == addon.id,
+                        OrganizationSubscriptionAddon.is_active.is_(True),
+                        OrganizationSubscriptionAddon.quantity > 0,
+                    )
+                )).all()
+                for sub_addon, sub in rows:
+                    sub_addon.unit_price = new_price
+                    await self.db.flush()
+                    try:
+                        await stripe_svc.sync_addon_quantity(sub.organization_id, addon.id)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(f"[update_plan_addon] sync Stripe falló: {e}")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"[update_plan_addon] propagate price falló: {e}")
+
+        return {
+            "status": "ok",
+            "id": str(addon.id),
+            "price_changed": price_changed,
+            "stripe_price_id": addon.stripe_price_id,
+        }
+
+    async def get_org_subscription_breakdown(self, org_id: uuid.UUID) -> dict | None:
+        """Breakdown del costo mensual: plan + addons + tiendas extras."""
+        sub = (await self.db.execute(
+            select(OrganizationSubscription)
+            .where(
+                OrganizationSubscription.organization_id == org_id,
+                OrganizationSubscription.status.in_(["trial", "active"]),
+            )
+            .order_by(OrganizationSubscription.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if sub is None:
+            return None
+
+        plan = (await self.db.execute(select(Plan).where(Plan.id == sub.plan_id))).scalar_one()
+
+        # Addons activos en la suscripción
+        addon_rows = (await self.db.execute(
+            select(OrganizationSubscriptionAddon, PlanAddon)
+            .join(PlanAddon, PlanAddon.id == OrganizationSubscriptionAddon.addon_id)
+            .where(
+                OrganizationSubscriptionAddon.subscription_id == sub.id,
+                OrganizationSubscriptionAddon.is_active.is_(True),
+                OrganizationSubscriptionAddon.quantity > 0,
+            )
+        )).all()
+        addons = []
+        addons_total = 0.0
+        for sub_addon, plan_addon in addon_rows:
+            line_total = float(sub_addon.unit_price) * sub_addon.quantity
+            addons_total += line_total
+            addons.append({
+                "addon_id": str(plan_addon.id),
+                "addon_type": plan_addon.addon_type,
+                "name": plan_addon.name,
+                "quantity": sub_addon.quantity,
+                "unit_price": float(sub_addon.unit_price),
+                "subtotal": line_total,
+            })
+
+        # Tiendas extras (price_per_additional_store en features)
+        free_stores = int((plan.features or {}).get("free_stores", 0) or 0)
+        extra_store_price = float((plan.features or {}).get("price_per_additional_store", 0) or 0)
+        store_count = (await self.db.execute(
+            select(func.count(Store.id)).where(Store.organization_id == org_id, Store.is_active.is_(True))
+        )).scalar_one() or 0
+        extra_stores = max(0, int(store_count) - free_stores)
+        extra_stores_total = extra_stores * extra_store_price
+
+        plan_total = float(plan.price_monthly)
+        grand_total = plan_total + addons_total + extra_stores_total
+
+        return {
+            "subscription_id": str(sub.id),
+            "status": sub.status,
+            "plan": {
+                "id": str(plan.id),
+                "slug": plan.slug,
+                "name": plan.name,
+                "price_monthly": plan_total,
+            },
+            "addons": addons,
+            "addons_total": addons_total,
+            "extra_stores": {
+                "free_included": free_stores,
+                "active_count": int(store_count),
+                "extras": extra_stores,
+                "unit_price": extra_store_price,
+                "subtotal": extra_stores_total,
+            },
+            "monthly_total": grand_total,
         }

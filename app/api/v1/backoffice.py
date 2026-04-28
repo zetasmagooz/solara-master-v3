@@ -26,9 +26,11 @@ from app.schemas.backoffice import (
     BowOrganizationDetail,
     BowOrganizationResponse,
     BowPaginatedResponse,
+    BowPlanAddonResponse,
     BowPlanResponse,
     BowRevenueByPlan,
     BowTrialResponse,
+    BowUpdatePlanAddonRequest,
     BowUpdatePlanRequest,
     BowExtendPlanRequest,
     BowExtendPlanResponse,
@@ -159,6 +161,54 @@ async def update_plan(
         ip_address=request.client.host if request.client else None,
     )
 
+    return result
+
+
+@router.get("/organizations/{org_id}/subscription-breakdown")
+async def get_org_subscription_breakdown(
+    org_id: uuid.UUID,
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Breakdown mensual: plan base + addons (kioskos) + tiendas extras."""
+    breakdown = await service.get_org_subscription_breakdown(org_id)
+    if not breakdown:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suscripción no encontrada")
+    return breakdown
+
+
+# ── Plan Addons ──────────────────────────────────────────
+
+
+@router.get("/plan-addons", response_model=list[BowPlanAddonResponse])
+async def list_plan_addons(
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Lista addons de planes (kiosko, etc.) con conteo de suscripciones activas."""
+    return await service.list_plan_addons()
+
+
+@router.patch("/plan-addons/{addon_id}", response_model=dict)
+async def update_plan_addon(
+    addon_id: uuid.UUID,
+    body: BowUpdatePlanAddonRequest,
+    request: Request,
+    current_user: BowUser = Depends(get_current_bow_user),
+    service: BackofficeService = Depends(_get_service),
+):
+    """Actualiza precio / nombre / activo de un addon."""
+    result = await service.update_plan_addon(addon_id, body.model_dump(exclude_none=True))
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Addon no encontrado")
+    await service.log_audit(
+        admin_user_id=current_user.id,
+        action="update_plan_addon",
+        entity_type="plan_addon",
+        entity_id=addon_id,
+        details=body.model_dump(exclude_none=True),
+        ip_address=request.client.host if request.client else None,
+    )
     return result
 
 

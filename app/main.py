@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.router import api_router
 from app.api.v1.ws_ecartpay import router as ws_router
 from app.api.v1.ws_kiosk_sync import router as ws_kiosk_router
+from app.api.v1.ws_kiosk_orders import router as ws_kiosk_orders_router
 from app.config import settings
 
 # ── Logging ──
@@ -45,6 +46,7 @@ OPENAPI_TAGS = [
     {"name": "dashboard", "description": "Dashboard: métricas en tiempo real, resumen de ventas del día"},
     {"name": "reports", "description": "Reportes: reportes organizacionales, análisis de ventas"},
     {"name": "kiosk", "description": "Kiosko: catálogo público, creación de órdenes self-service"},
+    {"name": "kioskos", "description": "Kioskos contratables: alta/baja, passwords, addon en suscripción"},
     {"name": "sync", "description": "Sincronización: datos iniciales para kiosko (productos, categorías)"},
     {"name": "organizations", "description": "Organizaciones: gestión de empresa, módulos (almacén, restaurante), defaults"},
     {"name": "subscriptions", "description": "Suscripciones: planes, trial, activación, estado actual"},
@@ -83,6 +85,7 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 app.include_router(ws_router, prefix="/ws")
 app.include_router(ws_kiosk_router, prefix="/ws")
+app.include_router(ws_kiosk_orders_router, prefix="/ws")
 
 
 @app.get("/health", tags=["health"])

@@ -924,6 +924,48 @@ async def generate_catalog_image(
     )
 
 
+class ImageEnhanceRequest(BaseModel):
+    base64_data: str = Field(..., description="Imagen en base64 (sin prefijo data:image/...)")
+
+
+@router.post("/ai/enhance-image", response_model=CatalogImageGenerateResponse)
+async def enhance_catalog_image(
+    data: ImageEnhanceRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Mejora una imagen subida por el usuario con IA para darle aspecto profesional.
+    Analiza la imagen con vision, luego regenera conservando la esencia
+    pero con iluminación, fondo y colores de estudio.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST http://66.179.92.115:8005/api/v1/catalog/ai/enhance-image \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"base64_data": "/9j/4AAQ..."}'
+    ```
+    """
+    features = await get_plan_features(db, current_user.organization_id)
+    cost = get_ai_image_cost(features)
+    used, limit = await consume_ai_usage(db, current_user.organization_id, cost=cost)
+
+    try:
+        from app.services.image_gen_service import enhance_image
+        jpeg_bytes = await enhance_image(data.base64_data)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Image enhancement failed: {e}")
+
+    import base64 as b64mod
+    base64_data = f"data:image/jpeg;base64,{b64mod.b64encode(jpeg_bytes).decode()}"
+    return CatalogImageGenerateResponse(
+        image_url=base64_data,
+        ai_cost=cost,
+        ai_used=used,
+        ai_limit=limit,
+    )
+
+
 @router.delete("/product-images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product_image(
     image_id: UUID,

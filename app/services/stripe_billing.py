@@ -11,7 +11,7 @@ from app.config import settings
 from app.models.organization import Organization
 from app.models.store import Store
 from app.models.stripe import StripeCustomer, StripeInvoice, StripePaymentMethod, StripeSubscription
-from app.models.subscription import OrganizationSubscription, Plan
+from app.models.subscription import OrganizationSubscription, OrganizationSubscriptionAddon, Plan, PlanAddon
 from app.services.warehouse_service import ensure_warehouse_for_plan
 
 logger = logging.getLogger(__name__)
@@ -874,3 +874,152 @@ class StripeBillingService:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    # ── Plan Addons (kiosko, futuros) ─────────────────────────
+
+    async def _ensure_addon_price(self, addon: PlanAddon) -> str | None:
+        """Garantiza un Stripe Price activo para el PlanAddon. Lo crea si no existe o si el monto cambió."""
+        amount = float(addon.price or 0)
+        if amount <= 0:
+            return None
+
+        _require_stripe_keys()
+
+        if addon.stripe_price_id:
+            try:
+                existing = stripe.Price.retrieve(addon.stripe_price_id)
+                existing_amount = (self._get_sub_field(existing, "unit_amount") or 0) / 100
+                if abs(existing_amount - amount) < 0.01 and self._get_sub_field(existing, "active"):
+                    return addon.stripe_price_id
+                try:
+                    stripe.Price.modify(addon.stripe_price_id, active=False)
+                except Exception as e:
+                    logger.warning(f"[STRIPE] No se pudo desactivar addon price viejo: {e}")
+            except Exception as e:
+                logger.warning(f"[STRIPE] Addon price viejo no encontrado: {e}")
+
+        # Reutilizar producto por metadata si existe
+        product_id = None
+        try:
+            search = stripe.Product.search(
+                query=f"metadata['plan_id']:'{addon.plan_id}' AND metadata['addon_type']:'{addon.addon_type}'"
+            )
+            if search.data:
+                product_id = search.data[0].id
+        except Exception:
+            pass
+
+        if not product_id:
+            product = stripe.Product.create(
+                name=addon.name,
+                description=addon.description or None,
+                metadata={
+                    "plan_id": str(addon.plan_id),
+                    "addon_id": str(addon.id),
+                    "addon_type": addon.addon_type,
+                    "kind": "plan_addon",
+                },
+            )
+            product_id = product.id
+
+        new_price = stripe.Price.create(
+            product=product_id,
+            unit_amount=int(round(amount * 100)),
+            currency="mxn",
+            recurring={"interval": "month"},
+            metadata={
+                "plan_id": str(addon.plan_id),
+                "addon_id": str(addon.id),
+                "addon_type": addon.addon_type,
+                "kind": "plan_addon",
+            },
+        )
+        addon.stripe_price_id = new_price.id
+        await self.db.flush()
+        logger.info(f"[STRIPE] Addon Price creado para {addon.name}: {new_price.id} (${amount})")
+        return new_price.id
+
+    async def sync_addon_quantity(self, organization_id: uuid.UUID, addon_id: uuid.UUID) -> dict | None:
+        """Sincroniza la quantity de un addon en la suscripción Stripe.
+        Lee de organization_subscription_addons y aplica al SubscriptionItem correspondiente.
+        Si quantity=0 o is_active=false, elimina el item.
+        """
+        _require_stripe_keys()
+        existing_sub = await self._get_active_stripe_subscription(organization_id)
+        if not existing_sub:
+            return {"action": "no_stripe_sub"}
+
+        addon = (await self.db.execute(select(PlanAddon).where(PlanAddon.id == addon_id))).scalar_one_or_none()
+        if addon is None:
+            return None
+
+        # Buscar la fila local de organization_subscription_addons (vía la suscripción local)
+        local_sub = (await self.db.execute(
+            select(OrganizationSubscription)
+            .where(
+                OrganizationSubscription.organization_id == organization_id,
+                OrganizationSubscription.status.in_(["trial", "active"]),
+            )
+            .order_by(OrganizationSubscription.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if local_sub is None:
+            return {"action": "no_local_sub"}
+
+        sub_addon = (await self.db.execute(
+            select(OrganizationSubscriptionAddon).where(
+                OrganizationSubscriptionAddon.subscription_id == local_sub.id,
+                OrganizationSubscriptionAddon.addon_id == addon_id,
+            )
+        )).scalar_one_or_none()
+
+        target_qty = int(sub_addon.quantity) if (sub_addon and sub_addon.is_active) else 0
+
+        addon_price_id = await self._ensure_addon_price(addon) if target_qty > 0 else addon.stripe_price_id
+
+        # Localizar item Stripe del addon (por metadata.addon_id)
+        stripe_sub_obj = stripe.Subscription.retrieve(existing_sub.stripe_subscription_id)
+        items = self._get_sub_field(stripe_sub_obj, "items")
+        item_data = self._get_sub_field(items, "data", []) if items else []
+
+        existing_item = None
+        for it in item_data:
+            price = self._get_sub_field(it, "price") or {}
+            price_meta = self._get_sub_field(price, "metadata") or {}
+            if self._get_sub_field(price_meta, "addon_id") == str(addon.id):
+                existing_item = it
+                break
+
+        if target_qty == 0:
+            if existing_item:
+                stripe.SubscriptionItem.delete(
+                    self._get_sub_field(existing_item, "id"),
+                    proration_behavior="create_prorations",
+                )
+                logger.info(f"[STRIPE] Removido addon item de sub {existing_sub.stripe_subscription_id}")
+                return {"action": "removed", "addon_id": str(addon.id)}
+            return {"action": "noop", "quantity": 0}
+
+        if not addon_price_id:
+            return {"action": "no_price"}
+
+        if existing_item:
+            current_qty = int(self._get_sub_field(existing_item, "quantity") or 0)
+            if current_qty == target_qty:
+                return {"action": "noop", "quantity": target_qty}
+            stripe.SubscriptionItem.modify(
+                self._get_sub_field(existing_item, "id"),
+                quantity=target_qty,
+                proration_behavior="always_invoice",
+            )
+            logger.info(f"[STRIPE] Addon quantity {current_qty}→{target_qty}")
+            return {"action": "updated", "from": current_qty, "to": target_qty}
+        else:
+            stripe.SubscriptionItem.create(
+                subscription=existing_sub.stripe_subscription_id,
+                price=addon_price_id,
+                quantity=target_qty,
+                proration_behavior="always_invoice",
+            )
+            logger.info(f"[STRIPE] Addon item agregado: qty={target_qty}")
+            return {"action": "added", "quantity": target_qty}

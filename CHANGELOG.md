@@ -1,5 +1,103 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-04-25
+
+### feat(kiosko-addon): Fase 4 — sincronización con Stripe (subscription items)
+- **`StripeBillingService._ensure_addon_price(addon)`**: garantiza un Stripe Price activo para el `PlanAddon`. Si el monto cambió, desactiva el viejo y crea uno nuevo (los Stripe Prices son inmutables). Reutiliza el Stripe Product buscando por `metadata.addon_id` para evitar duplicados.
+- **`StripeBillingService.sync_addon_quantity(organization_id, addon_id)`**: lee la `quantity` de `organization_subscription_addons` y aplica al SubscriptionItem correspondiente:
+  - Crea el item si no existía (`always_invoice` proration).
+  - Actualiza la quantity si cambió.
+  - Elimina el item si quantity=0 / addon desactivado (`create_prorations`).
+- **`KioskoAddonService`**: invoca `_sync_stripe()` (best-effort, no bloquea) tras cada `create_kiosko`, `_increment_addon_for`, `_decrement_addon_for`. Falla silenciosa con log si Stripe no está configurado.
+- **Backoffice `update_plan_addon`**: si el precio cambia → recrea Stripe Price y propaga la nueva tarifa (`unit_price`) a todas las suscripciones que tienen el addon activo, haciendo `sync_addon_quantity` para cada una.
+- **Smoke test verificado**: contracts/decrements no fallan aunque Stripe no esté configurado o el customer no tenga suscripción Stripe activa todavía (caso "trial sin método de pago").
+
+### feat(backoffice): endpoints para gestión de plan_addons + breakdown de suscripción
+- **`GET /backoffice/plan-addons`**: lista todos los addons (kiosko etc.) por plan con:
+  - `plan_id`, `plan_slug`, `plan_name`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`.
+  - `contracted_count`: suma de `quantity` activos en `organization_subscription_addons` (cuántos kioskos están realmente contratados a través de este addon).
+- **`PATCH /backoffice/plan-addons/{addon_id}`**: actualiza `name`, `description`, `price`, `stripe_price_id`, `is_active`. Genera audit log.
+- **`GET /backoffice/organizations/{org_id}/subscription-breakdown`**: breakdown del costo mensual real:
+  - Plan base + lista de addons activos (con `quantity`, `unit_price`, `subtotal` por addon) + tiendas extras.
+  - `monthly_total` agregado con todos los conceptos.
+- Schemas nuevos en `app/schemas/backoffice.py`: `BowPlanAddonResponse`, `BowUpdatePlanAddonRequest`.
+
+## 2026-04-24
+
+### feat(kiosko-addon): Fase 3 — atribución de ventas con `Sale.kiosko_id`
+- **`SaleService.create_sale(data, user_id=None, kiosko_id=None)`**: nuevo parámetro `kiosko_id`. Valida que al menos uno de los dos esté presente (refleja el CHECK constraint). Setea ambos en la Sale creada.
+- **`KioskService.create_kiosk_order`** (flujo tarjeta/transfer directo): ahora pasa `kiosko_id=device_id` al crear la Sale. Resultado: `Sale.user_id=NULL`, `Sale.kiosko_id=<device>`.
+- **`KioskService.collect_order`** (cajero cobra pending): ahora pasa `kiosko_id=order.device_id` además de `user_id=cajero`. Resultado: `Sale.user_id=<cajero>`, `Sale.kiosko_id=<kiosko origen>`. Trazabilidad completa del origen de la orden aunque el cobro lo haga un humano.
+- **Reportes existentes**: los filtros `Sale.user_id == X` excluyen NULL automáticamente — ventas de kiosko no aparecen en reportes "por cajero X" (correcto: no son de ningún humano). Para listados globales del store siguen contando.
+- **Verificado end-to-end** en `scripts/smoke_kiosko_sale.py`: venta tarjeta → `user_id=NULL, kiosko_id=set`; pago en caja → `user_id=cajero, kiosko_id=origen`.
+
+### feat(kiosko-addon): Fase 2 — login del kiosko con JWT propio
+- **`POST /auth/kiosko-login`**: recibe `kiosko_code` + `password`. Valida kiosko activo, suscripción con addon `kiosko` activo (`is_active=true` y `quantity > 0`), y password matching contra `kiosko_passwords.password_hash`. Retorna JWT con claims:
+  - `sub` = `kiosko_id`, `is_kiosko=true`, `kiosko_id`, `kiosko_code`, `store_id`, `owner_user_id`, `require_password_change`.
+- **`KioskoAddonService.authenticate(...)`**: método central de autenticación + emisión de tokens. Usa `create_access_token` / `create_refresh_token` existentes (RS256).
+- **Dependency `get_current_kiosko`** en `app/dependencies.py`: decodifica JWT, valida `is_kiosko=true`, carga `KioskDevice` + `password` asociado. Usable en endpoints que espera el propio kiosko autenticado.
+- **`POST /kioskos/me/change-password`** (reemplaza `/kioskos/{id}/change-password`): ahora requiere JWT del propio kiosko. Flujo de primer login:
+  1. Login con temp_password → JWT con `require_password_change=true`.
+  2. Llamada a `/me/change-password` con `current_password` + `new_password`.
+  3. Re-login emite nuevo JWT con `require_password_change=false`.
+- **Validado end-to-end** en `scripts/smoke_kiosko_login.py`: crea kiosko → login temp → change-password → re-login → password vieja rechazada (401).
+
+### feat(kiosko-addon): Fase 1 — endpoints de gestión de kioskos
+- **Nuevo router `/kioskos`** (distinto al `/kiosk` de órdenes). Endpoints:
+  - `POST /kioskos` (permiso `kiosko:contratar`): genera `kiosko_code` consecutivo por store (`K001`, `K002`…) con lock `FOR UPDATE`, crea password temporal (8 chars alfanum) con `require_change=true`, incrementa `quantity` en `organization_subscription_addons` (o crea la fila si es el primero). Retorna `temp_password` (mostrar una vez al owner).
+  - `GET /kioskos?store_id=...&include_inactive=false` (permiso `kiosko:ver`): lista por store.
+  - `GET /kioskos/count?store_id=...`: solo conteo activo. Sin permiso especial — se usa para gate de visibilidad del módulo en frontend.
+  - `GET /kioskos/{id}` (permiso `kiosko:ver`): detalle + flag `require_password_change`.
+  - `PATCH /kioskos/{id}` (permiso `kiosko:editar`): cambia `device_name` y `is_active`. Activar/desactivar ajusta `quantity` del addon automáticamente.
+  - `POST /kioskos/{id}/reset-password` (permiso `kiosko:reset_pwd`): regenera password temporal, fuerza cambio.
+  - `POST /kioskos/{id}/change-password` (sin JWT): cambio obligatorio en primer login; requiere password actual + nueva (mín. 6 chars).
+- **Nuevo servicio `KioskoAddonService`** (`app/services/kiosko_addon_service.py`): CRUD + gestión de passwords + sincronización del addon en la suscripción.
+- **Nuevos schemas** en `app/schemas/kiosk.py`: `KioskoCreateRequest`, `KioskoCreateResponse`, `KioskoUpdateRequest`, `KioskoResponse`, `KioskoPasswordResetResponse`, `KioskoChangePasswordRequest`.
+- **Script smoke**: `scripts/smoke_kioskos.py` valida create/list/reset/update contra DEV.
+
+### feat(kiosko-addon): Fase 0 — schema para módulo Kiosko contratable
+- **Nueva tabla `plan_addons`**: catálogo de addons por plan (ahora con `kiosko`). Campos: `plan_id`, `addon_type`, `name`, `description`, `price`, `stripe_price_id`, `is_active`. UNIQUE(`plan_id`, `addon_type`). Seed idempotente en `app/seeds/seed_plan_addons.py` — precio global 149 MXN/kiosko (editable desde backoffice).
+- **Nueva tabla `organization_subscription_addons`**: addons contratados por cada suscripción. Campos: `subscription_id`, `addon_id`, `quantity`, `unit_price`, `is_active`. Index por `subscription_id`.
+- **`kiosk_devices`** gana: `owner_user_id` (FK users), `kiosko_number` (int consecutivo por store), `kiosko_code` (VARCHAR 20 UNIQUE, formato `K001`). Campos nullable para convivir con dispositivos existentes hasta backfill.
+- **Nueva tabla `kiosko_passwords`**: password independiente por kiosko (no la del owner). Campos: `kiosko_id` PK, `password_hash`, `require_change` (default true), `last_changed_at`, `last_changed_by_user_id`. Primer login fuerza cambio.
+- **`sales`** gana: `kiosko_id` (FK `kiosk_devices`, nullable) + CHECK constraint `ck_sales_user_or_kiosko`: `user_id IS NOT NULL OR kiosko_id IS NOT NULL`. Backfill dentro de la migración: 20 ventas huérfanas (19 Crepas + 1 otra) reasignadas al owner de la org.
+- **Permisos**: nuevo módulo `kiosko` en `app/constants/permissions.py` con acciones `ver`, `contratar`, `editar`, `desactivar`, `reset_pwd`. Agregado `kiosko:ver` al rol Gerente. Administrador los recibe automáticamente.
+- **Migración**: `m7n8o9p0q1r2_add_kiosko_addon_tables.py` (incluye backfill de `sales.user_id`).
+
+## 2026-04-23
+
+### feat(kiosk): cobro desde POS con cart editable + Sale completa en respuesta
+- **`KioskOrderCollectRequest.items`** (opcional): lista completa final del cart del cajero. Si viene, reemplaza los items originales de la `KioskOrder`. Permite al POS editar/agregar/quitar productos antes de cobrar.
+- Bifurcación en `KioskService.collect_order`:
+  - Si `items` viene → modo **override**: usa solo esos items, recalcula subtotal.
+  - Si no → modo **cobro rápido**: usa items originales + `extra_items` (comportamiento previo).
+- **`KioskOrderCollectResponse.sale`** ahora incluye la Sale completa serializada (con items y payments) → el POS puede alimentar el printer y la pantalla de confirmación sin un round-trip extra.
+
+### feat(kiosk): cobros pendientes en caja (pago en caja desde kiosko self-service)
+- **Modelo `KioskOrder`**: nuevos campos `collected_at`, `collected_by_user_id` (FK `users`), `sale_id` (FK `sales`); `status` ampliado a `VARCHAR(30)` para soportar `pending_cashier`.
+- **Migración**: `l6m7n8o9p0q1_add_kiosk_pending_cashier.py` + índice `ix_kiosk_orders_status_store`.
+- **Servicio `KioskService.create_kiosk_order`** bifurca por `payment_method`:
+  - `pending_cashier` → crea `KioskOrder` + items con `status='pending_cashier'`, **no crea Sale**, emite evento WS `pending_order_created` al room del store.
+  - Resto (card/transfer/etc.) → flujo actual (crea Sale + Payment, status=`completed`).
+- **Nuevos métodos de servicio**: `list_pending_orders(store_id)`, `get_order_detailed(order_id)`, `collect_order(order_id, data, user_id)`, `cancel_order(order_id, user_id)`.
+- **Endpoints REST** (auth JWT):
+  - `GET /api/v1/kiosk/pending-orders?store_id=X` — lista órdenes pendientes con items detallados (incluye `product_name`, `variant_name`).
+  - `GET /api/v1/kiosk/orders/{id}/detail` — detalle completo.
+  - `POST /api/v1/kiosk/orders/{id}/collect` — cajero cobra: crea Sale + Payment (items originales + extras opcionales del cajero), marca orden como `completed`, emite WS `pending_order_collected`.
+  - `POST /api/v1/kiosk/orders/{id}/cancel` — cancela orden pendiente, emite WS `pending_order_cancelled`.
+- **WebSocket** nuevo endpoint `/ws/kiosk/orders?store_id=X` (archivo `app/api/v1/ws_kiosk_orders.py`) + manager `kiosk_orders_manager` (`app/services/kiosk_orders_ws_manager.py`).
+- **Schemas**: `KioskOrderDetailedResponse`, `KioskOrderItemDetailedResponse`, `KioskOrderCollectRequest`, `KioskOrderExtraItem`, `KioskOrderCollectResponse`.
+
+
+
+### feat(inventory-ia): endpoints batch para ajuste multi-producto con cantidades individuales
+- `POST /inventory/ia/preview-batch` y `POST /inventory/ia/apply-batch` — aceptan `{ action, items: [{product_id, quantity}], source_scope?, source_id? }`. Permiten ajustar N productos con cantidades diferentes en una sola operación (ej. sumar 5 huevos, 10 cafés, 3 galletas).
+- `source_scope` (`product`/`category`/`brand`) y `source_id` son opcionales — se usan solo para auditoría del `reason` del ajuste cuando los productos vinieron pre-filtrados desde una categoría o marca.
+- Nuevos schemas: `IABatchItem`, `IAPreviewBatchRequest`, `IAApplyBatchRequest`, `IAPreviewBatchItem`, `IAPreviewBatchResponse`, `IABatchSourceScope`.
+- `InventoryIAService.preview_batch` / `apply_batch` reusan `InventoryAdjustment` e `InventoryAdjustmentItem` existentes → el flujo de `undo` (máx 30 min) funciona igual para batch.
+- Validación: carga productos en una sola query (`WHERE id IN (...)`) y valida que todos existan, pertenezcan al store y estén activos antes de aplicar; stock negativo se clamp a 0.
+- Endpoints `/inventory/ia/preview` y `/inventory/ia/apply` se mantienen sin cambios (usados por el flujo legacy de supplier/combo que ajusta la misma cantidad a todos los productos del grupo).
+
 ## 2026-04-20
 
 ### feat(kiosk): promociones brand_select ahora banner wide + linked_combo_id

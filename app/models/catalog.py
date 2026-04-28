@@ -101,6 +101,7 @@ class Product(Base):
     can_return_to_inventory: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
     sort_order: Mapped[int] = mapped_column(Integer, server_default=text("0"), default=0)
     is_favorite: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
+    preparation_time: Mapped[int | None] = mapped_column(Integer)
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))

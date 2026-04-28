@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,44 @@ class OrganizationSubscription(Base):
     # Relationships
     organization: Mapped["Organization"] = relationship(foreign_keys=[organization_id])
     plan: Mapped["Plan"] = relationship(back_populates="subscriptions")
+
+
+class PlanAddon(Base):
+    """Addon contratable. Si plan_id es NULL → aplica a cualquier plan (precio global)."""
+    __tablename__ = "plan_addons"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("plans.id"), nullable=True)
+    addon_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, server_default=text("0"))
+    stripe_price_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    plan: Mapped["Plan | None"] = relationship()
+
+
+class OrganizationSubscriptionAddon(Base):
+    """Addons contratados en la suscripción de la organización. Cantidad × precio."""
+    __tablename__ = "organization_subscription_addons"
+    __table_args__ = (
+        Index("ix_org_sub_addons_subscription", "subscription_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    subscription_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization_subscriptions.id"), nullable=False)
+    addon_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("plan_addons.id"), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    unit_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    subscription: Mapped["OrganizationSubscription"] = relationship()
+    addon: Mapped["PlanAddon"] = relationship()
 
 
 # Lazy imports

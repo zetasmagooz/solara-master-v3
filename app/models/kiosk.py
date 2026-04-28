@@ -13,14 +13,19 @@ class KioskDevice(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
-    device_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    device_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     device_name: Mapped[str | None] = mapped_column(String(100))
     device_info: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    # Kiosko como entidad contratable (Fase 0 addon)
+    owner_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    kiosko_number: Mapped[int | None] = mapped_column(Integer)
+    kiosko_code: Mapped[str | None] = mapped_column(String(20), unique=True)
 
     sessions: Mapped[list["KioskSession"]] = relationship(back_populates="device")
+    password: Mapped["KioskoPassword | None"] = relationship(back_populates="kiosko", uselist=False)
 
 
 class KioskSession(Base):
@@ -42,7 +47,8 @@ class KioskOrder(Base):
     device_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id"), nullable=False)
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200))
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    order_type: Mapped[str | None] = mapped_column(String(20), default="dine_in")
+    status: Mapped[str] = mapped_column(String(30), default="pending")
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     tax: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
@@ -51,6 +57,10 @@ class KioskOrder(Base):
     local_id: Mapped[str | None] = mapped_column(String(100))
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    # Cobros pendientes en caja (pago en caja desde kiosko)
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    sale_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sales.id"))
 
     items: Mapped[list["KioskOrderItem"]] = relationship(back_populates="kiosk_order", cascade="all, delete-orphan")
 
@@ -123,3 +133,18 @@ class KioskOrderItem(Base):
     removed_supplies: Mapped[list] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
 
     kiosk_order: Mapped[KioskOrder] = relationship(back_populates="items")
+
+
+class KioskoPassword(Base):
+    """Contraseña del kiosko (independiente del owner). Primer login fuerza cambio."""
+    __tablename__ = "kiosko_passwords"
+
+    kiosko_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id", ondelete="CASCADE"), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    require_change: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
+    last_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    last_changed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"), onupdate=text("NOW()"))
+
+    kiosko: Mapped["KioskDevice"] = relationship(back_populates="password")

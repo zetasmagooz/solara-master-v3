@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Numeric, ForeignKey, Integer, String, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Numeric, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,11 +16,18 @@ if TYPE_CHECKING:
 class Sale(Base):
     """Venta registrada. Contiene totales, método de pago, propina, descuento y envío."""
     __tablename__ = "sales"
+    __table_args__ = (
+        CheckConstraint(
+            "user_id IS NOT NULL OR kiosko_id IS NOT NULL",
+            name="ck_sales_user_or_kiosko",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
     order_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orders.id"))
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    kiosko_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("kiosk_devices.id"))
     customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"))
     sale_number: Mapped[str | None] = mapped_column(String(50))
     subtotal: Mapped[float] = mapped_column(Numeric(12, 2), default=0)

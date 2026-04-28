@@ -11,7 +11,7 @@ from app.models.combo import Combo, ComboItem
 from app.models.order import Order, OrderItem
 from app.models.sale import Sale, SaleItem, Payment, SaleReturn, SaleReturnItem
 from app.models.inventory import InventoryMovement
-from app.models.kiosk import KioskDevice, KioskSession, KioskOrder, KioskOrderItem
+from app.models.kiosk import KioskDevice, KioskSession, KioskOrder, KioskOrderItem, KioskoPassword
 from app.models.sync import SyncLog, EntityChangelog
 from app.models.employee import Employee
 from app.models.customer import Customer
@@ -20,7 +20,7 @@ from app.models.ai import AiConversationMemory, AiStoreLearning, AiSuperpower, A
 from app.models.restaurant import RestaurantTable, TableSession, TableSessionTable, TableOrder
 from app.models.platform_order import PlatformOrder, PlatformOrderStatusLog
 from app.models.warehouse import WarehouseEntry, WarehouseEntryItem, WarehouseTransfer, WarehouseTransferItem
-from app.models.subscription import Plan, OrganizationSubscription
+from app.models.subscription import Plan, OrganizationSubscription, PlanAddon, OrganizationSubscriptionAddon
 from app.models.stripe import StripeCustomer, StripePaymentMethod, StripeSubscription, StripeInvoice
 from app.models.backoffice import BowUser, BowSession, BowBlockLog, BowPlanPriceHistory, BowAuditLog, BowCommissionConfig, AiUsageDaily
 from app.models.weather import WeatherSnapshot
@@ -39,7 +39,7 @@ __all__ = [
     "Order", "OrderItem",
     "Sale", "SaleItem", "Payment", "SaleReturn", "SaleReturnItem",
     "InventoryMovement",
-    "KioskDevice", "KioskSession", "KioskOrder", "KioskOrderItem",
+    "KioskDevice", "KioskSession", "KioskOrder", "KioskOrderItem", "KioskoPassword",
     "SyncLog", "EntityChangelog",
     "Employee",
     "Customer",
@@ -48,7 +48,7 @@ __all__ = [
     "RestaurantTable", "TableSession", "TableSessionTable", "TableOrder",
     "PlatformOrder", "PlatformOrderStatusLog",
     "WarehouseEntry", "WarehouseEntryItem", "WarehouseTransfer", "WarehouseTransferItem",
-    "Plan", "OrganizationSubscription",
+    "Plan", "OrganizationSubscription", "PlanAddon", "OrganizationSubscriptionAddon",
     "StripeCustomer", "StripePaymentMethod", "StripeSubscription", "StripeInvoice",
     "BowUser", "BowSession", "BowBlockLog", "BowPlanPriceHistory", "BowAuditLog", "BowCommissionConfig", "AiUsageDaily",
     "WeatherSnapshot",

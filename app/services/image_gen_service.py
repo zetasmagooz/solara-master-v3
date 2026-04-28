@@ -8,8 +8,8 @@ from PIL import Image
 from app.config import settings
 
 
-async def _run_dalle(prompt: str, portrait: bool = False, landscape: bool = False) -> bytes:
-    """Llama a DALL-E y devuelve los bytes crudos de la imagen generada."""
+async def _run_image_gen(prompt: str, portrait: bool = False, landscape: bool = False) -> bytes:
+    """Genera imagen con GPT Image (gpt-image-1) y devuelve los bytes crudos."""
     if portrait:
         size = "1024x1536"
     elif landscape:
@@ -68,6 +68,59 @@ def _finalize_jpeg_wh(raw_bytes: bytes, width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
+async def enhance_image(image_base64: str, context: str = "product") -> bytes:
+    """Mejora una imagen conservando su esencia.
+    1. GPT-4.1-mini vision analiza la imagen en detalle
+    2. gpt-image-1 genera una versión mejorada que conserva el mismo sujeto,
+       composición y esencia pero con iluminación, fondo y colores profesionales.
+    Recibe base64, retorna JPEG mejorado en bytes."""
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    data_url = f"data:image/jpeg;base64,{image_base64}"
+
+    # Paso 1: Analizar la imagen con visión para capturar cada detalle
+    vision_response = await client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "Describe this image in extreme detail so it can be recreated faithfully. "
+                        "Include: exact subject (product, food, item), exact colors and textures, "
+                        "arrangement and position of every element, shape, toppings, garnishes, "
+                        "container/plate type, and any small details. "
+                        "The description must be precise enough to recreate this EXACT same image. "
+                        "Max 300 words. Only describe what you see, no opinions."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": data_url},
+                },
+            ],
+        }],
+        max_tokens=400,
+    )
+    description = vision_response.choices[0].message.content or "product"
+
+    # Paso 2: Regenerar con mejoras profesionales conservando la esencia
+    prompt = (
+        f"Recreate this EXACT image faithfully with professional studio quality: {description}. "
+        "IMPORTANT: Keep the SAME subject, SAME composition, SAME arrangement, SAME colors, "
+        "SAME elements — do NOT change what is in the photo. "
+        "Only improve: professional studio lighting with soft diffused light, "
+        "clean and uncluttered background appropriate for the subject, "
+        "enhanced color vibrancy while staying natural, subtle depth of field, "
+        "commercial photography quality suitable for e-commerce or restaurant menu. "
+        "No text, no watermarks, no logos, no borders."
+    )
+
+    raw = await _run_image_gen(prompt)
+    return _finalize_jpeg(raw, 512)
+
+
 async def generate_product_image(name: str, description: str | None = None) -> bytes:
     """Genera foto de producto (fondo blanco de estudio) 250x250 JPEG."""
     desc_part = f" {description}." if description else ""
@@ -76,7 +129,7 @@ async def generate_product_image(name: str, description: str | None = None) -> b
         "Professional studio photography, white background, centered, high quality, "
         "commercial product shot, clean lighting, no text, no watermarks."
     )
-    raw = await _run_dalle(prompt)
+    raw = await _run_image_gen(prompt)
     return _finalize_jpeg(raw, 250)
 
 
@@ -95,7 +148,8 @@ async def generate_kiosk_banner_image(
         "Shallow depth of field with creamy blurred bokeh background, warm ambient lighting "
         "and soft circular light bokeh spots. "
         "Professional advertising and magazine-quality photography, full-frame 50mm lens look, "
-        "vibrant yet natural colors, warm color grading, inviting and appetizing mood. "
+        "vibrant yet natural colors, warm color grading, inviting and attractive mood. "
+        "The subject and style MUST match the category/product name — do NOT default to food imagery. "
         "Strictly no text, no captions, no watermarks, no logos, no brand marks, no borders, no UI elements."
     )
     if orientation == "portrait":
@@ -119,7 +173,7 @@ async def generate_kiosk_banner_image(
             f"{common} "
             "Square 1:1 composition framed so the subject is centered and works as a kiosk tile."
         )
-    raw = await _run_dalle(
+    raw = await _run_image_gen(
         prompt,
         portrait=(orientation == "portrait"),
         landscape=(orientation == "wide_banner"),

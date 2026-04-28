@@ -35,6 +35,7 @@ class KioskOrderItemCreate(BaseModel):
 class KioskOrderCreate(BaseModel):
     customer_name: str | None = None
     payment_method: str | None = None
+    order_type: str | None = "dine_in"
     notes: str | None = None
     local_id: str | None = None
     items: list[KioskOrderItemCreate]
@@ -52,6 +53,7 @@ class KioskOrderResponse(BaseModel):
     payment_method: str | None = None
     notes: str | None = None
     local_id: str | None = None
+    order_type: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -61,6 +63,89 @@ class KioskOrderStatusResponse(BaseModel):
     id: UUID
     status: str
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# --- Cobros pendientes en caja ---
+
+class KioskOrderItemDetailedResponse(BaseModel):
+    id: UUID
+    product_id: UUID | None = None
+    variant_id: UUID | None = None
+    combo_id: UUID | None = None
+    product_name: str | None = None
+    variant_name: str | None = None
+    quantity: int
+    unit_price: float
+    total_price: float
+    notes: str | None = None
+    modifiers: list[dict] = []
+    removed_supplies: list[dict] = []
+
+    model_config = {"from_attributes": True}
+
+
+class KioskOrderDetailedResponse(BaseModel):
+    id: UUID
+    device_id: UUID
+    device_name: str | None = None
+    store_id: UUID
+    customer_name: str | None = None
+    status: str
+    subtotal: float
+    tax: float
+    total: float
+    payment_method: str | None = None
+    notes: str | None = None
+    local_id: str | None = None
+    order_type: str | None = None
+    created_at: datetime
+    items: list[KioskOrderItemDetailedResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+class KioskOrderExtraItem(BaseModel):
+    """Item adicional agregado por el cajero al cobrar una orden pendiente."""
+    product_id: UUID | None = None
+    variant_id: UUID | None = None
+    combo_id: UUID | None = None
+    quantity: int = 1
+    unit_price: float
+    name: str | None = None
+    notes: str | None = None
+    modifiers: list[dict] = []
+    removed_supplies: list[dict] = []
+
+
+class KioskOrderCollectRequest(BaseModel):
+    """Cobro del cajero. Método real de pago + items.
+
+    Modos de uso:
+      A) Cobro rápido: solo `payment_method` (+ opcionalmente `extra_items`).
+         Backend usa los items originales de la KioskOrder.
+      B) Cobro desde POS: `items` contiene la lista COMPLETA FINAL del cart.
+         Backend ignora los items originales y usa solo los del body.
+         Esto permite que el cajero agregue/edite/elimine productos antes
+         de cobrar. `extra_items` se ignora si `items` viene presente.
+    """
+    payment_method: str  # cash | card | transfer | platform
+    items: list[KioskOrderExtraItem] | None = None
+    extra_items: list[KioskOrderExtraItem] = []
+    discount: float = 0.0
+    tip: float = 0.0
+    notes: str | None = None
+
+
+class KioskOrderCollectResponse(BaseModel):
+    kiosk_order_id: UUID
+    sale_id: UUID
+    sale_number: str | None = None
+    status: str
+    total: float
+    # Sale completa para alimentar el printer y la confirmación en el POS sin otro round-trip
+    sale: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -153,3 +238,64 @@ class KioskPromotionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Gestión de Kioskos contratables (Fase 1 addon) ─────────
+
+class KioskoCreateRequest(BaseModel):
+    store_id: UUID
+    device_name: str | None = None
+
+
+class KioskoUpdateRequest(BaseModel):
+    device_name: str | None = None
+    is_active: bool | None = None
+
+
+class KioskoChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class KioskoResponse(BaseModel):
+    id: UUID
+    store_id: UUID
+    owner_user_id: UUID | None
+    kiosko_code: str | None
+    kiosko_number: int | None
+    device_code: str
+    device_name: str | None
+    is_active: bool
+    last_sync_at: datetime | None
+    created_at: datetime
+    require_password_change: bool = False
+
+    model_config = {"from_attributes": True}
+
+
+class KioskoCreateResponse(BaseModel):
+    """Respuesta al crear un kiosko. Incluye password temporal (se muestra una vez)."""
+    kiosko: KioskoResponse
+    temp_password: str
+
+
+class KioskoPasswordResetResponse(BaseModel):
+    kiosko_id: UUID
+    kiosko_code: str
+    temp_password: str
+
+
+class KioskoLoginRequest(BaseModel):
+    kiosko_code: str
+    password: str
+
+
+class KioskoTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    kiosko_id: UUID
+    kiosko_code: str
+    store_id: UUID
+    owner_user_id: UUID | None
+    require_password_change: bool

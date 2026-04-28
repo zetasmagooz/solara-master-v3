@@ -121,6 +121,43 @@ def require_permission(*perms: str):
     return Depends(checker)
 
 
+# ── Kiosko dependencies ──────────────────────────────────
+
+
+async def get_current_kiosko(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Valida JWT de kiosko (is_kiosko=true) y retorna el KioskDevice."""
+    from sqlalchemy.orm import selectinload
+    from app.models.kiosk import KioskDevice
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token de kiosko inválido",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(token)
+        if not payload.get("is_kiosko"):
+            raise credentials_exception
+        kiosko_id = payload.get("kiosko_id") or payload.get("sub")
+        if not kiosko_id:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    result = await db.execute(
+        select(KioskDevice)
+        .where(KioskDevice.id == kiosko_id, KioskDevice.is_active.is_(True))
+        .options(selectinload(KioskDevice.password))
+    )
+    kiosko = result.scalar_one_or_none()
+    if kiosko is None:
+        raise credentials_exception
+    return kiosko
+
+
 # ── Backoffice dependencies ──────────────────────────────
 
 

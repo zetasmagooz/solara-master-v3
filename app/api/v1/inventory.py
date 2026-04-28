@@ -6,8 +6,11 @@ from app.models.user import User
 from app.schemas.inventory import (
     AdjustmentCreate,
     AdjustmentResponse,
+    IAApplyBatchRequest,
     IAApplyRequest,
     IAApplyResponse,
+    IAPreviewBatchRequest,
+    IAPreviewBatchResponse,
     IAPreviewRequest,
     IAPreviewResponse,
     IASearchRequest,
@@ -209,6 +212,58 @@ async def ia_apply(
         raise HTTPException(status_code=400, detail=str(e))
 
     return result
+
+
+@router.post("/ia/preview-batch", response_model=IAPreviewBatchResponse)
+async def ia_preview_batch(
+    data: IAPreviewBatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Vista previa de ajuste multi-producto con cantidades individuales.
+
+    Permite ajustar N productos con cantidades diferentes en una sola operación.
+    `source_scope`/`source_id` son opcionales — solo para auditoría (ej. productos
+    filtrados desde una categoría o marca).
+    """
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    service = InventoryIAService(db)
+    try:
+        return await service.preview_batch(
+            store_id=current_user.default_store_id,
+            action=data.action.value,
+            items=data.items,
+            source_scope=data.source_scope.value if data.source_scope else None,
+            source_id=data.source_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/ia/apply-batch", response_model=IAApplyResponse, status_code=status.HTTP_201_CREATED)
+async def ia_apply_batch(
+    data: IAApplyBatchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aplica ajuste multi-producto con cantidades individuales. Guarda snapshot para deshacer."""
+    if not current_user.default_store_id:
+        raise HTTPException(status_code=400, detail="Usuario sin tienda asignada")
+
+    service = InventoryIAService(db)
+    try:
+        return await service.apply_batch(
+            store_id=current_user.default_store_id,
+            user_id=current_user.id,
+            action=data.action.value,
+            items=data.items,
+            source_scope=data.source_scope.value if data.source_scope else None,
+            source_id=data.source_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/ia/undo/{adjustment_id}", response_model=IAUndoResponse)

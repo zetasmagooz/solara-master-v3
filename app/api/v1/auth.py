@@ -21,8 +21,10 @@ from app.schemas.auth import (
     TokenResponse,
     UserResponse,
 )
+from app.schemas.kiosk import KioskoLoginRequest, KioskoTokenResponse
 from app.schemas.organization import SwitchStoreRequest
 from app.services.auth_service import AuthService
+from app.services.kiosko_addon_service import KioskoAddonService
 from app.services.subscription_service import SubscriptionService
 from app.utils.security import decode_token
 
@@ -301,3 +303,30 @@ async def list_business_types(db: Annotated[AsyncSession, Depends(get_db)]):
     """
     result = await db.execute(select(BusinessType).order_by(BusinessType.category, BusinessType.name))
     return result.scalars().all()
+
+
+@router.post("/kiosko-login", response_model=KioskoTokenResponse, tags=["kioskos"])
+async def kiosko_login(
+    data: KioskoLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Login de un kiosko. Acepta `kiosko_code` + password del kiosko (no la del owner).
+
+    Retorna JWT con `is_kiosko=true` y `require_password_change` si es el primer login.
+    """
+    service = KioskoAddonService(db)
+    try:
+        kiosko, tokens = await service.authenticate(data.kiosko_code, data.password)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+    return KioskoTokenResponse(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_type=tokens["token_type"],
+        kiosko_id=kiosko.id,
+        kiosko_code=kiosko.kiosko_code or "",
+        store_id=kiosko.store_id,
+        owner_user_id=kiosko.owner_user_id,
+        require_password_change=tokens["require_password_change"],
+    )

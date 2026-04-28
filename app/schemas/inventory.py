@@ -216,3 +216,47 @@ class IAApplyResponse(BaseModel):
 class IAUndoResponse(BaseModel):
     undone_count: int
     status: str = "reverted"
+
+
+# ── Flujo IA Batch — Ajuste multi-producto con cantidades individuales ──
+
+class IABatchSourceScope(str, Enum):
+    product = "product"
+    category = "category"
+    brand = "brand"
+
+
+class IABatchItem(BaseModel):
+    product_id: str
+    quantity: float = Field(..., gt=0)
+
+
+class IAPreviewBatchRequest(BaseModel):
+    action: IAActionType
+    items: list[IABatchItem] = Field(..., min_length=1)
+    source_scope: IABatchSourceScope | None = None
+    source_id: str | None = None
+
+
+class IAApplyBatchRequest(BaseModel):
+    action: IAActionType
+    items: list[IABatchItem] = Field(..., min_length=1)
+    source_scope: IABatchSourceScope | None = None
+    source_id: str | None = None
+
+
+class IAPreviewBatchItem(BaseModel):
+    product_id: str
+    product_name: str
+    before: float
+    after: float
+    quantity: float
+
+
+class IAPreviewBatchResponse(BaseModel):
+    action: str
+    affected_count: int
+    source_scope: str | None = None
+    source_name: str | None = None
+    warnings: list[str] = []
+    items: list[IAPreviewBatchItem] = []
