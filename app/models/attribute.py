@@ -20,6 +20,7 @@ class AttributeDefinition(Base):
     is_required: Mapped[bool] = mapped_column(Boolean, default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     applicable_product_types: Mapped[dict | None] = mapped_column(JSONB)  # [1, 2, 3] o null = todos
+    applicable_category_ids: Mapped[dict | None] = mapped_column(JSONB)  # [uuid,...] o null = todas
     generates_variants: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("NOW()"))

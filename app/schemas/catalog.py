@@ -50,6 +50,7 @@ class AttributeDefinitionCreate(BaseModel):
     is_required: bool = False
     sort_order: int = 0
     applicable_product_types: dict | None = None
+    applicable_category_ids: dict | None = None
     generates_variants: bool = False
 
 
@@ -60,6 +61,7 @@ class AttributeDefinitionUpdate(BaseModel):
     is_required: bool | None = None
     sort_order: int | None = None
     applicable_product_types: dict | None = None
+    applicable_category_ids: dict | None = None
     generates_variants: bool | None = None
     is_active: bool | None = None
 
@@ -73,6 +75,7 @@ class AttributeDefinitionResponse(BaseModel):
     is_required: bool
     sort_order: int
     applicable_product_types: dict | None = None
+    applicable_category_ids: dict | None = None
     generates_variants: bool
     is_active: bool
 

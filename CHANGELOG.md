@@ -2,6 +2,12 @@
 
 ## 2026-04-27
 
+### feat(catalog): scoping opcional de atributos por categoría (Fase 8)
+
+- **Migración `p0q1r2s3t4u5`**: nuevo campo `attribute_definitions.applicable_category_ids` (JSONB nullable). `null` o `[]` = aplica a todas las categorías; con UUIDs solo aplica a esos.
+- **Modelo y schemas Pydantic** (`AttributeDefinitionCreate/Update/Response`) ganan `applicable_category_ids: dict | None = None`.
+- **Sin cambios en queries**: el filtrado se hace 100% en frontend (los atributos no son tantos por tienda y la información ya viaja en el payload). Mantiene los endpoints existentes intactos.
+
 ### feat(catalog): filtro de productos por valores de atributo (Fase 7)
 
 - **`GET /api/v1/catalog/products`** acepta nuevo query param `attr_options`: lista de UUIDs de `variant_option` separada por coma.
