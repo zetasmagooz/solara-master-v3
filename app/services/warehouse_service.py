@@ -6,7 +6,7 @@ from sqlalchemy import func, select, union_all, literal, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.catalog import Brand, Category, Product, ProductImage, Subcategory
+from app.models.catalog import Product, ProductImage
 from app.models.inventory import InventoryMovement
 from app.models.organization import Organization
 from app.models.store import Store
@@ -116,71 +116,13 @@ class WarehouseService:
     async def _copy_catalog_to_warehouse(
         self, source_store_id: uuid.UUID, warehouse_store_id: uuid.UUID
     ) -> int:
-        """Copia productos, categorías, marcas y subcategorías de una tienda al almacén.
-        NO modifica la tienda origen. Retorna cantidad de productos copiados."""
-        # Mapeos para reusar IDs ya creados
-        category_map: dict[uuid.UUID, uuid.UUID] = {}
-        brand_map: dict[uuid.UUID, uuid.UUID] = {}
-        subcategory_map: dict[uuid.UUID, uuid.UUID] = {}
+        """Copia productos de una tienda al almacén reusando catálogo org-scoped.
+
+        Categorías, marcas, subcategorías y atributos son globales a la organización
+        (org-scoped), por lo que el almacén comparte los mismos registros. Solo se
+        clonan los productos al almacén con sus FKs originales intactas.
+        """
         copied = 0
-
-        # Copiar categorías
-        result = await self.db.execute(
-            select(Category).where(
-                Category.store_id == source_store_id, Category.is_active.is_(True)
-            )
-        )
-        for cat in result.scalars().all():
-            new_cat = Category(
-                store_id=warehouse_store_id,
-                name=cat.name,
-                description=cat.description,
-                image_url=cat.image_url,
-                is_active=True,
-            )
-            self.db.add(new_cat)
-            await self.db.flush()
-            category_map[cat.id] = new_cat.id
-
-        # Copiar subcategorías
-        result = await self.db.execute(
-            select(Subcategory).where(
-                Subcategory.store_id == source_store_id, Subcategory.is_active.is_(True)
-            )
-        )
-        for subcat in result.scalars().all():
-            parent_id = category_map.get(subcat.category_id)
-            if not parent_id:
-                continue
-            new_subcat = Subcategory(
-                category_id=parent_id,
-                store_id=warehouse_store_id,
-                name=subcat.name,
-                description=subcat.description,
-                is_active=True,
-            )
-            self.db.add(new_subcat)
-            await self.db.flush()
-            subcategory_map[subcat.id] = new_subcat.id
-
-        # Copiar marcas
-        result = await self.db.execute(
-            select(Brand).where(
-                Brand.store_id == source_store_id, Brand.is_active.is_(True)
-            )
-        )
-        for brand in result.scalars().all():
-            new_brand = Brand(
-                store_id=warehouse_store_id,
-                name=brand.name,
-                image_url=brand.image_url,
-                is_active=True,
-            )
-            self.db.add(new_brand)
-            await self.db.flush()
-            brand_map[brand.id] = new_brand.id
-
-        # Copiar productos con imágenes
         result = await self.db.execute(
             select(Product)
             .where(Product.store_id == source_store_id, Product.is_active.is_(True))
@@ -189,10 +131,10 @@ class WarehouseService:
         for product in result.scalars().all():
             new_product = Product(
                 store_id=warehouse_store_id,
-                category_id=category_map.get(product.category_id) if product.category_id else None,
-                subcategory_id=subcategory_map.get(product.subcategory_id) if product.subcategory_id else None,
+                category_id=product.category_id,
+                subcategory_id=product.subcategory_id,
                 product_type_id=product.product_type_id,
-                brand_id=brand_map.get(product.brand_id) if product.brand_id else None,
+                brand_id=product.brand_id,
                 name=product.name,
                 description=product.description,
                 sku=product.sku,
@@ -214,7 +156,6 @@ class WarehouseService:
             self.db.add(new_product)
             await self.db.flush()
 
-            # Copiar imágenes
             for img in product.images:
                 new_img = ProductImage(
                     product_id=new_product.id,
@@ -419,11 +360,6 @@ class WarehouseService:
         self.db.add(transfer)
         await self.db.flush()
 
-        # Preparar mapeos de categorías/marcas para auto-crear
-        brand_map: dict[uuid.UUID, uuid.UUID] = {}
-        category_map: dict[uuid.UUID, uuid.UUID] = {}
-        subcategory_map: dict[uuid.UUID, uuid.UUID] = {}
-
         for item_data in items_data:
             product_id = item_data["product_id"]
             variant_id = item_data.get("variant_id")
@@ -534,109 +470,15 @@ class WarehouseService:
                 if not target_product.cost_price or float(target_product.cost_price) == 0:
                     target_product.cost_price = source_product.cost_price
             else:
-                # Auto-crear producto en tienda destino
-                # Mapear categoría
-                new_category_id = None
-                if source_product.category_id:
-                    if source_product.category_id not in category_map:
-                        # Buscar categoría por nombre en destino
-                        result = await self.db.execute(
-                            select(Category).where(Category.id == source_product.category_id)
-                        )
-                        source_cat = result.scalar_one_or_none()
-                        if source_cat:
-                            result = await self.db.execute(
-                                select(Category).where(
-                                    Category.store_id == target_store_id,
-                                    Category.name == source_cat.name,
-                                )
-                            )
-                            target_cat = result.scalar_one_or_none()
-                            if target_cat:
-                                category_map[source_product.category_id] = target_cat.id
-                            else:
-                                new_cat = Category(
-                                    store_id=target_store_id,
-                                    name=source_cat.name,
-                                    description=source_cat.description,
-                                    image_url=source_cat.image_url,
-                                    is_active=True,
-                                )
-                                self.db.add(new_cat)
-                                await self.db.flush()
-                                category_map[source_product.category_id] = new_cat.id
-                    new_category_id = category_map.get(source_product.category_id)
-
-                # Mapear marca
-                new_brand_id = None
-                if source_product.brand_id:
-                    if source_product.brand_id not in brand_map:
-                        result = await self.db.execute(
-                            select(Brand).where(Brand.id == source_product.brand_id)
-                        )
-                        source_brand = result.scalar_one_or_none()
-                        if source_brand:
-                            result = await self.db.execute(
-                                select(Brand).where(
-                                    Brand.store_id == target_store_id,
-                                    Brand.name == source_brand.name,
-                                )
-                            )
-                            target_brand = result.scalar_one_or_none()
-                            if target_brand:
-                                brand_map[source_product.brand_id] = target_brand.id
-                            else:
-                                new_brand = Brand(
-                                    store_id=target_store_id,
-                                    name=source_brand.name,
-                                    image_url=source_brand.image_url,
-                                    is_active=True,
-                                )
-                                self.db.add(new_brand)
-                                await self.db.flush()
-                                brand_map[source_product.brand_id] = new_brand.id
-                    new_brand_id = brand_map.get(source_product.brand_id)
-
-                # Mapear subcategoría
-                new_subcategory_id = None
-                if source_product.subcategory_id:
-                    if source_product.subcategory_id not in subcategory_map:
-                        result = await self.db.execute(
-                            select(Subcategory).where(Subcategory.id == source_product.subcategory_id)
-                        )
-                        source_subcat = result.scalar_one_or_none()
-                        if source_subcat:
-                            parent_cat_id = category_map.get(source_subcat.category_id)
-                            if parent_cat_id:
-                                result = await self.db.execute(
-                                    select(Subcategory).where(
-                                        Subcategory.store_id == target_store_id,
-                                        Subcategory.name == source_subcat.name,
-                                        Subcategory.category_id == parent_cat_id,
-                                    )
-                                )
-                                target_subcat = result.scalar_one_or_none()
-                                if target_subcat:
-                                    subcategory_map[source_product.subcategory_id] = target_subcat.id
-                                else:
-                                    new_subcat = Subcategory(
-                                        category_id=parent_cat_id,
-                                        store_id=target_store_id,
-                                        name=source_subcat.name,
-                                        description=source_subcat.description,
-                                        is_active=True,
-                                    )
-                                    self.db.add(new_subcat)
-                                    await self.db.flush()
-                                    subcategory_map[source_product.subcategory_id] = new_subcat.id
-                    new_subcategory_id = subcategory_map.get(source_product.subcategory_id)
-
+                # Auto-crear producto en tienda destino reusando catálogo org-scoped:
+                # categories, subcategories y brands son globales a la organización,
+                # por lo que el producto destino referencia los mismos IDs del origen.
                 target_product = Product(
                     store_id=target_store_id,
-                    category_id=new_category_id,
-                    subcategory_id=new_subcategory_id,
+                    category_id=source_product.category_id,
+                    subcategory_id=source_product.subcategory_id,
                     product_type_id=source_product.product_type_id,
-                    brand_id=new_brand_id,
+                    brand_id=source_product.brand_id,
                     name=source_product.name,
                     description=source_product.description,
                     sku=source_product.sku,

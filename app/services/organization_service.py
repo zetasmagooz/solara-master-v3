@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.catalog import Brand, Category, Product, ProductImage, Subcategory
+from app.models.catalog import Product, ProductImage
 from app.models.organization import Organization
 from app.models.sale import Payment, Sale
 from app.models.store import Store
@@ -60,71 +60,12 @@ class OrganizationService:
     async def copy_catalog(
         self, source_store_id: uuid.UUID, target_store_id: uuid.UUID
     ) -> dict:
-        """Copia categorías, marcas y productos de una tienda a otra."""
-        # Mapeo de IDs viejos → nuevos
-        brand_map: dict[uuid.UUID, uuid.UUID] = {}
-        category_map: dict[uuid.UUID, uuid.UUID] = {}
-        subcategory_map: dict[uuid.UUID, uuid.UUID] = {}
+        """Copia productos de una tienda a otra reusando catálogo org-scoped.
 
-        # 1. Copiar brands
-        brands_result = await self.db.execute(
-            select(Brand).where(Brand.store_id == source_store_id, Brand.is_active.is_(True))
-        )
-        for brand in brands_result.scalars().all():
-            new_brand = Brand(
-                store_id=target_store_id,
-                name=brand.name,
-                image_url=brand.image_url,
-                is_active=True,
-            )
-            self.db.add(new_brand)
-            await self.db.flush()
-            brand_map[brand.id] = new_brand.id
-
-        # 2. Copiar categorías
-        cats_result = await self.db.execute(
-            select(Category).where(
-                Category.store_id == source_store_id, Category.is_active.is_(True)
-            )
-        )
-        for cat in cats_result.scalars().all():
-            new_cat = Category(
-                store_id=target_store_id,
-                brand_id=brand_map.get(cat.brand_id) if cat.brand_id else None,
-                name=cat.name,
-                description=cat.description,
-                image_url=cat.image_url,
-                sort_order=cat.sort_order,
-                is_active=True,
-                show_in_kiosk=cat.show_in_kiosk,
-            )
-            self.db.add(new_cat)
-            await self.db.flush()
-            category_map[cat.id] = new_cat.id
-
-        # 3. Copiar subcategorías
-        subcats_result = await self.db.execute(
-            select(Subcategory).where(Subcategory.store_id == source_store_id, Subcategory.is_active.is_(True))
-        )
-        for subcat in subcats_result.scalars().all():
-            new_cat_id = category_map.get(subcat.category_id)
-            if not new_cat_id:
-                continue
-            new_subcat = Subcategory(
-                category_id=new_cat_id,
-                store_id=target_store_id,
-                name=subcat.name,
-                description=subcat.description,
-                image_url=subcat.image_url,
-                sort_order=subcat.sort_order,
-                is_active=True,
-                show_in_kiosk=subcat.show_in_kiosk,
-            )
-            self.db.add(new_subcat)
-            await self.db.flush()
-            subcategory_map[subcat.id] = new_subcat.id
-
-        # 4. Copiar productos
+        Categorías, marcas, subcategorías y atributos son globales a la organización
+        (org-scoped), por lo que NO se duplican aquí. Los productos copiados referencian
+        los mismos category_id/brand_id/subcategory_id del origen.
+        """
         products_result = await self.db.execute(
             select(Product)
             .where(Product.store_id == source_store_id, Product.is_active.is_(True))
@@ -134,10 +75,10 @@ class OrganizationService:
         for product in products_result.scalars().all():
             new_product = Product(
                 store_id=target_store_id,
-                category_id=category_map.get(product.category_id) if product.category_id else None,
-                subcategory_id=subcategory_map.get(product.subcategory_id) if product.subcategory_id else None,
+                category_id=product.category_id,
+                subcategory_id=product.subcategory_id,
                 product_type_id=product.product_type_id,
-                brand_id=brand_map.get(product.brand_id) if product.brand_id else None,
+                brand_id=product.brand_id,
                 name=product.name,
                 description=product.description,
                 sku=product.sku,
@@ -145,10 +86,10 @@ class OrganizationService:
                 base_price=product.base_price,
                 cost_price=product.cost_price,
                 tax_rate=product.tax_rate,
-                stock=0,  # Stock inicia en 0 en la nueva tienda
+                stock=0,
                 min_stock=product.min_stock,
                 max_stock=product.max_stock,
-                has_variants=False,  # No copiar variantes/modifiers por complejidad
+                has_variants=False,
                 has_supplies=False,
                 has_modifiers=False,
                 is_active=True,
@@ -159,7 +100,6 @@ class OrganizationService:
             self.db.add(new_product)
             await self.db.flush()
 
-            # Copiar imágenes (por referencia)
             for img in product.images:
                 new_img = ProductImage(
                     product_id=new_product.id,
@@ -174,8 +114,8 @@ class OrganizationService:
         await self.db.flush()
 
         return {
-            "brands_copied": len(brand_map),
-            "categories_copied": len(category_map),
-            "subcategories_copied": len(subcategory_map),
+            "brands_copied": 0,
+            "categories_copied": 0,
+            "subcategories_copied": 0,
             "products_copied": products_copied,
         }
