@@ -24,13 +24,44 @@ class RestaurantService:
 
     # ── Tables CRUD ──────────────────────────────────────
 
+    @staticmethod
+    def _normalize_zone(zone: str | None) -> str | None:
+        if zone is None:
+            return None
+        cleaned = zone.strip()
+        return cleaned or None
+
+    async def _assert_no_table_conflict(
+        self,
+        store_id: UUID,
+        zone: str | None,
+        table_number: int,
+        exclude_id: UUID | None = None,
+    ) -> None:
+        stmt = select(RestaurantTable.id).where(
+            RestaurantTable.store_id == store_id,
+            RestaurantTable.table_number == table_number,
+            RestaurantTable.is_active.is_(True),
+            RestaurantTable.zone.is_not_distinct_from(zone),
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(RestaurantTable.id != exclude_id)
+        if (await self.db.execute(stmt)).scalar_one_or_none():
+            zona_label = zone if zone else "sin zona"
+            raise HTTPException(
+                status_code=409,
+                detail=f"Ya existe la mesa {table_number} en la zona '{zona_label}'",
+            )
+
     async def create_table(self, data: RestaurantTableCreate) -> RestaurantTable:
+        zone = self._normalize_zone(data.zone)
+        await self._assert_no_table_conflict(data.store_id, zone, data.table_number)
         table = RestaurantTable(
             store_id=data.store_id,
             table_number=data.table_number,
             name=data.name,
             capacity=data.capacity,
-            zone=data.zone,
+            zone=zone,
             sort_order=data.sort_order,
         )
         self.db.add(table)
@@ -43,7 +74,19 @@ class RestaurantService:
         table = result.scalar_one_or_none()
         if not table:
             raise HTTPException(status_code=404, detail="Mesa no encontrada")
-        for field, value in data.model_dump(exclude_unset=True).items():
+        payload = data.model_dump(exclude_unset=True)
+        if "zone" in payload:
+            payload["zone"] = self._normalize_zone(payload["zone"])
+        next_zone = payload["zone"] if "zone" in payload else table.zone
+        next_number = payload["table_number"] if "table_number" in payload else table.table_number
+        next_active = payload["is_active"] if "is_active" in payload else table.is_active
+        if next_active and (
+            "zone" in payload or "table_number" in payload or "is_active" in payload
+        ):
+            await self._assert_no_table_conflict(
+                table.store_id, next_zone, next_number, exclude_id=table.id
+            )
+        for field, value in payload.items():
             setattr(table, field, value)
         await self.db.flush()
         await self.db.refresh(table)

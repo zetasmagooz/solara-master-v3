@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, Numeric, ForeignKey, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, DateTime, Index, Integer, Numeric, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,7 +12,14 @@ class RestaurantTable(Base):
     """Mesa de restaurante. Número, capacidad, zona y orden de visualización."""
     __tablename__ = "restaurant_tables"
     __table_args__ = (
-        UniqueConstraint("store_id", "table_number", name="uq_store_table_number"),
+        Index(
+            "uq_store_zone_table_number_active",
+            "store_id",
+            "zone",
+            "table_number",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
