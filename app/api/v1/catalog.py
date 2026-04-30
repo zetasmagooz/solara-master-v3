@@ -878,7 +878,7 @@ async def generate_product_image_endpoint(
 
     features = await get_plan_features(db, current_user.organization_id)
     cost = get_ai_image_cost(features)
-    await consume_ai_usage(db, current_user.organization_id, cost=cost)
+    await consume_ai_usage(db, current_user.organization_id, product.store_id, cost=cost)
 
     try:
         jpeg_bytes = await generate_product_image(product.name, product.description)
@@ -895,6 +895,7 @@ class CatalogImageGenerateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=500)
     orientation: str = Field(default="square", pattern="^(square|portrait|wide_banner)$")
+    store_id: str | None = Field(default=None, description="Tienda contra la que se cobra el cupo de IA")
 
 
 class CatalogImageGenerateResponse(BaseModel):
@@ -924,7 +925,8 @@ async def generate_catalog_image(
     """
     features = await get_plan_features(db, current_user.organization_id)
     cost = get_ai_image_cost(features)
-    used, limit = await consume_ai_usage(db, current_user.organization_id, cost=cost)
+    effective_store_id = data.store_id or (str(current_user.default_store_id) if current_user.default_store_id else None)
+    used, limit = await consume_ai_usage(db, current_user.organization_id, effective_store_id, cost=cost)
 
     try:
         jpeg_bytes = await generate_kiosk_banner_image(
@@ -946,6 +948,7 @@ async def generate_catalog_image(
 
 class ImageEnhanceRequest(BaseModel):
     base64_data: str = Field(..., description="Imagen en base64 (sin prefijo data:image/...)")
+    store_id: str | None = Field(default=None, description="Tienda contra la que se cobra el cupo de IA")
 
 
 @router.post("/ai/enhance-image", response_model=CatalogImageGenerateResponse)
@@ -968,7 +971,8 @@ async def enhance_catalog_image(
     """
     features = await get_plan_features(db, current_user.organization_id)
     cost = get_ai_image_cost(features)
-    used, limit = await consume_ai_usage(db, current_user.organization_id, cost=cost)
+    effective_store_id = data.store_id or (str(current_user.default_store_id) if current_user.default_store_id else None)
+    used, limit = await consume_ai_usage(db, current_user.organization_id, effective_store_id, cost=cost)
 
     try:
         from app.services.image_gen_service import enhance_image

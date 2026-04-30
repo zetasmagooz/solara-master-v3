@@ -107,10 +107,12 @@ async def _record_ai_usage_detailed(
         logger.warning(f"[AI/ASK] No se pudo registrar uso detallado en ai_usage_daily: {e}")
 
 
-async def _check_and_increment_ai_usage(db: AsyncSession, user: User) -> tuple[int, int]:
-    """Verifica límite de IA y retorna (used_today, limit). Lanza error si excede.
-    Wrapper sobre `consume_ai_usage(cost=1)` para compatibilidad."""
-    return await consume_ai_usage(db, user.organization_id, cost=1)
+async def _check_and_increment_ai_usage(
+    db: AsyncSession, user: User, store_id: str | None
+) -> tuple[int, int]:
+    """Verifica límite de IA por tienda y retorna (used_today, limit). Lanza 429 si excede."""
+    effective_store_id = store_id or (str(user.default_store_id) if user.default_store_id else None)
+    return await consume_ai_usage(db, user.organization_id, effective_store_id, cost=1)
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -132,8 +134,8 @@ async def ask(
     ```
     """
     try:
-        # Verificar y registrar uso de IA
-        used_today, ai_limit = await _check_and_increment_ai_usage(db, current_user)
+        # Verificar y registrar uso de IA (por tienda)
+        used_today, ai_limit = await _check_and_increment_ai_usage(db, current_user, body.store_id)
         await db.commit()
         response.headers["X-AI-Used"] = str(used_today)
         response.headers["X-AI-Limit"] = str(ai_limit)
@@ -217,6 +219,9 @@ async def ask(
 
         return result
 
+    except HTTPException:
+        # Propagar tal cual (ej: 429 ai_limit_reached) sin convertir a 500
+        raise
     except Exception as e:
         logger.exception(f"Error en /ai/ask: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -253,10 +258,19 @@ async def get_audio(
 async def get_ai_usage(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: str | None = None,
 ):
-    """Retorna uso diario de IA y límite del plan."""
+    """Retorna uso diario de IA de la tienda y límite del plan.
+
+    El cupo del plan aplica por tienda. Si no se pasa `store_id` se usa
+    `current_user.default_store_id`.
+    """
     org_id = current_user.organization_id
     if not org_id:
+        return {"used": 0, "limit": 0}
+
+    effective_store_id = store_id or (str(current_user.default_store_id) if current_user.default_store_id else None)
+    if not effective_store_id:
         return {"used": 0, "limit": 0}
 
     # Límite del plan
@@ -274,11 +288,11 @@ async def get_ai_usage(
     if sub and sub.plan and sub.plan.features:
         limit = sub.plan.features.get("ai_queries_per_day", -1)
 
-    # Uso de hoy
+    # Uso de hoy de la tienda
     today = date.today()
     usage_result = await db.execute(
         select(AiDailyUsage).where(
-            AiDailyUsage.organization_id == org_id,
+            AiDailyUsage.store_id == effective_store_id,
             AiDailyUsage.usage_date == today,
         )
     )

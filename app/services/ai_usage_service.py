@@ -44,14 +44,17 @@ def get_ai_image_cost(features: dict) -> int:
 
 
 async def consume_ai_usage(
-    db: AsyncSession, organization_id, cost: int = 1
+    db: AsyncSession, organization_id, store_id, cost: int = 1
 ) -> tuple[int, int]:
-    """Valida el límite diario de IA e incrementa `query_count` en `cost`.
+    """Valida el límite diario de IA por tienda e incrementa `query_count` en `cost`.
+
+    El cupo del plan (`features.ai_queries_per_day`) se aplica independientemente
+    para cada tienda — una org con N tiendas tiene N cupos diarios separados.
 
     Retorna `(used_today_after, limit)`. Lanza HTTP 429 si excede.
     El caller es responsable de `db.commit()`.
     """
-    if not organization_id:
+    if not organization_id or not store_id:
         return 0, -1
 
     features = await get_plan_features(db, organization_id)
@@ -60,7 +63,7 @@ async def consume_ai_usage(
     today = date.today()
     result = await db.execute(
         select(AiDailyUsage).where(
-            AiDailyUsage.organization_id == organization_id,
+            AiDailyUsage.store_id == store_id,
             AiDailyUsage.usage_date == today,
         )
     )
@@ -85,6 +88,7 @@ async def consume_ai_usage(
     else:
         usage = AiDailyUsage(
             organization_id=organization_id,
+            store_id=store_id,
             usage_date=today,
             query_count=cost,
         )
