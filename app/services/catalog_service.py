@@ -380,7 +380,40 @@ class CatalogService:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def _validate_bulk(self, kwargs: dict, *, has_variants: bool, product_type_id: int) -> None:
+        """Reglas de venta a granel.
+
+        - is_bulk=true requiere unit_id válido y activo.
+        - is_bulk solo aplica a product_type_id == 1 (Producto).
+        - is_bulk no compatible con has_variants=true en fase 1.
+        - is_bulk=false anula los campos relacionados (limpieza).
+        """
+        from fastapi import HTTPException
+        from app.models.unit import UnitOfMeasure
+
+        if not kwargs.get("is_bulk"):
+            kwargs["unit_id"] = None
+            kwargs["bulk_min_quantity"] = None
+            kwargs["bulk_step"] = None
+            return
+
+        if product_type_id != 1:
+            raise HTTPException(status_code=400, detail="Venta a granel solo aplica a productos (no servicios/combos/paquetes)")
+        if has_variants:
+            raise HTTPException(status_code=400, detail="Productos con variantes no pueden venderse a granel en esta versión")
+        unit_id = kwargs.get("unit_id")
+        if not unit_id:
+            raise HTTPException(status_code=400, detail="Selecciona una unidad de medida para venta a granel")
+        unit = await self.db.get(UnitOfMeasure, unit_id)
+        if not unit or not unit.is_active:
+            raise HTTPException(status_code=400, detail="Unidad de medida no válida")
+
     async def create_product(self, store_id: UUID, **kwargs) -> Product:
+        await self._validate_bulk(
+            kwargs,
+            has_variants=bool(kwargs.get("has_variants", False)),
+            product_type_id=int(kwargs.get("product_type_id", 1)),
+        )
         product = Product(store_id=store_id, **kwargs)
         self.db.add(product)
         await self.db.flush()
@@ -388,6 +421,11 @@ class CatalogService:
         return await self.get_product(product.id)
 
     async def create_product_with_attributes(self, store_id: UUID, attributes_data: list[dict], **kwargs) -> Product:
+        await self._validate_bulk(
+            kwargs,
+            has_variants=bool(kwargs.get("has_variants", False)),
+            product_type_id=int(kwargs.get("product_type_id", 1)),
+        )
         product = Product(store_id=store_id, **kwargs)
         self.db.add(product)
         await self.db.flush()
@@ -405,8 +443,30 @@ class CatalogService:
         product = result.scalar_one_or_none()
         if not product:
             return None
+        # Determinar valores efectivos post-update para validar bulk
+        next_has_variants = kwargs.get("has_variants", product.has_variants)
+        next_product_type = product.product_type_id  # update no cambia tipo
+        # Solo validar bulk si el payload menciona alguno de los campos relacionados
+        if any(k in kwargs for k in ("is_bulk", "unit_id", "bulk_min_quantity", "bulk_step")):
+            # Construir un dict efectivo (combinar valor actual con el del payload)
+            effective = {
+                "is_bulk": kwargs["is_bulk"] if "is_bulk" in kwargs else product.is_bulk,
+                "unit_id": kwargs["unit_id"] if "unit_id" in kwargs else product.unit_id,
+                "bulk_min_quantity": kwargs.get("bulk_min_quantity", product.bulk_min_quantity),
+                "bulk_step": kwargs.get("bulk_step", product.bulk_step),
+            }
+            await self._validate_bulk(
+                effective,
+                has_variants=bool(next_has_variants),
+                product_type_id=int(next_product_type),
+            )
+            # Si la validación reseteó campos (is_bulk=false), aplicarlos al payload
+            for k in ("is_bulk", "unit_id", "bulk_min_quantity", "bulk_step"):
+                if k in effective:
+                    kwargs[k] = effective[k]
         for key, value in kwargs.items():
-            if value is not None:
+            # Permitir set explícito a None (necesario para limpiar campos bulk)
+            if key in ("is_bulk", "unit_id", "bulk_min_quantity", "bulk_step") or value is not None:
                 setattr(product, key, value)
         await self.db.flush()
         await record_change(self.db, product.store_id, "product", product.id, "update")

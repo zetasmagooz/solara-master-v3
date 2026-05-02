@@ -64,7 +64,7 @@ class SaleItem(Base):
     product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("products.id"))
     variant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("product_variants.id"))
     name: Mapped[str] = mapped_column(String(300), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False, default=1)
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     total_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     combo_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("combos.id"))
@@ -75,6 +75,9 @@ class SaleItem(Base):
     removed_supplies_json: Mapped[list | None] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     commission_amount: Mapped[float | None] = mapped_column(Numeric(12, 2))
     commission_percent: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    # ── Snapshot de unidad de medida (solo si el producto era bulk al vender) ──
+    unit_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("units_of_measure.id"))
+    unit_symbol: Mapped[str | None] = mapped_column(String(10))
 
     sale: Mapped[Sale] = relationship(back_populates="items")
 
@@ -126,7 +129,7 @@ class SaleReturnItem(Base):
     product_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     variant_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     name: Mapped[str] = mapped_column(String(300), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 3), nullable=False)
     unit_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     total_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False)
     returned_to_inventory: Mapped[bool] = mapped_column(Boolean, default=False)

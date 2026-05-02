@@ -40,13 +40,33 @@ from app.schemas.catalog import (
     SubcategoryCreate,
     SubcategoryResponse,
     SubcategoryUpdate,
+    UnitOfMeasureResponse,
     VariantMatrixResponse,
 )
+from app.models.unit import UnitOfMeasure
 from app.services.ai_usage_service import consume_ai_usage, get_ai_image_cost, get_plan_features
 from app.services.catalog_service import CatalogService
 from app.services.image_gen_service import generate_kiosk_banner_image, generate_product_image
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
+
+
+# --- Units of Measure (catálogo global, lectura) ---
+@router.get("/units-of-measure", response_model=list[UnitOfMeasureResponse])
+async def list_units_of_measure(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Lista global de unidades de medida activas.
+
+    No depende de la org/store. Cliente cachea por sesión.
+    """
+    result = await db.execute(
+        select(UnitOfMeasure)
+        .where(UnitOfMeasure.is_active.is_(True))
+        .order_by(UnitOfMeasure.sort_order, UnitOfMeasure.name)
+    )
+    return list(result.scalars().all())
 
 
 # --- Categories ---

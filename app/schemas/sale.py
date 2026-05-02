@@ -9,7 +9,8 @@ class SaleItemCreate(BaseModel):
     variant_id: UUID | None = None
     combo_id: UUID | None = None
     name: str
-    quantity: int = 1
+    # Acepta decimal para productos a granel (kg, l, etc.). Para no-bulk se valida entero en el servicio.
+    quantity: float = 1
     unit_price: float
     discount: float = 0
     tax: float = 0
@@ -55,7 +56,7 @@ class SaleItemResponse(BaseModel):
     variant_id: UUID | None = None
     combo_id: UUID | None = None
     name: str
-    quantity: int
+    quantity: float
     unit_price: float
     total_price: float
     discount: float = 0
@@ -65,6 +66,9 @@ class SaleItemResponse(BaseModel):
     removed_supplies_json: list[dict] = []
     commission_amount: float | None = None
     commission_percent: float | None = None
+    # Snapshot de unidad para items vendidos a granel (null si no era bulk)
+    unit_id: int | None = None
+    unit_symbol: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -156,7 +160,7 @@ class SaleReturnItemResponse(BaseModel):
     product_id: UUID | None = None
     variant_id: UUID | None = None
     name: str
-    quantity: int
+    quantity: float
     unit_price: float
     total_price: float
     returned_to_inventory: bool

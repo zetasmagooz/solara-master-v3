@@ -98,6 +98,11 @@ class Product(Base):
     has_variants: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
     has_supplies: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
     has_modifiers: Mapped[bool] = mapped_column(Boolean, server_default=text("false"), default=False)
+    # ── Venta a granel (bulk) — opcional, default false ──
+    is_bulk: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"), default=False)
+    unit_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("units_of_measure.id"))
+    bulk_min_quantity: Mapped[float | None] = mapped_column(Numeric(12, 3))
+    bulk_step: Mapped[float | None] = mapped_column(Numeric(12, 3))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
     show_in_pos: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
     show_in_kiosk: Mapped[bool] = mapped_column(Boolean, server_default=text("true"), default=True)
@@ -118,6 +123,7 @@ class Product(Base):
     supplies: Mapped[list["ProductSupply"]] = relationship(back_populates="product", cascade="all, delete-orphan")
     modifier_groups: Mapped[list["ProductModifierGroup"]] = relationship(back_populates="product", cascade="all, delete-orphan")
     attributes: Mapped[list["ProductAttribute"]] = relationship(back_populates="product", cascade="all, delete-orphan")
+    unit: Mapped["UnitOfMeasure | None"] = relationship("UnitOfMeasure", lazy="selectin")
 
 
 class ProductImage(Base):
@@ -138,3 +144,4 @@ from app.models.variant import ProductVariant  # noqa: E402, F401
 from app.models.supply import ProductSupply  # noqa: E402, F401
 from app.models.modifier import ProductModifierGroup  # noqa: E402, F401
 from app.models.attribute import ProductAttribute  # noqa: E402, F401
+from app.models.unit import UnitOfMeasure  # noqa: E402, F401

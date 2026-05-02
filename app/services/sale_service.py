@@ -78,7 +78,42 @@ class SaleService:
 
         # Crear items y deducir inventario
         for item_data in data.items:
-            total_price = item_data.unit_price * item_data.quantity - item_data.discount + item_data.tax
+            # Validación bulk + snapshot de unidad
+            unit_id = None
+            unit_symbol = None
+            qty = float(item_data.quantity)
+            if item_data.product_id:
+                from app.models.catalog import Product as _Product
+                prod = await self.db.get(_Product, item_data.product_id)
+                if prod and prod.is_bulk:
+                    # Producto a granel: aceptar cantidad decimal con validaciones
+                    if qty <= 0:
+                        raise HTTPException(status_code=400, detail=f"Cantidad inválida para '{prod.name}'")
+                    if prod.bulk_min_quantity and qty < float(prod.bulk_min_quantity):
+                        sym = prod.unit.symbol if prod.unit else ""
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cantidad mínima de '{prod.name}' es {prod.bulk_min_quantity} {sym}",
+                        )
+                    if prod.bulk_step:
+                        step = float(prod.bulk_step)
+                        # Tolerancia de 1e-6 para evitar falsos negativos por float
+                        ratio = qty / step
+                        if abs(ratio - round(ratio)) > 1e-6:
+                            sym = prod.unit.symbol if prod.unit else ""
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Cantidad de '{prod.name}' debe ser múltiplo de {prod.bulk_step} {sym}",
+                            )
+                    unit_id = prod.unit_id
+                    unit_symbol = prod.unit.symbol if prod.unit else None
+                elif prod and not prod.is_bulk and qty != int(qty):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{prod.name}' no se vende a granel — la cantidad debe ser entera",
+                    )
+
+            total_price = item_data.unit_price * qty - item_data.discount + item_data.tax
 
             item = SaleItem(
                 sale_id=sale.id,
@@ -86,7 +121,7 @@ class SaleService:
                 variant_id=item_data.variant_id,
                 combo_id=item_data.combo_id,
                 name=item_data.name,
-                quantity=item_data.quantity,
+                quantity=qty,
                 unit_price=item_data.unit_price,
                 total_price=total_price,
                 discount=item_data.discount,
@@ -94,14 +129,16 @@ class SaleService:
                 tax_rate=item_data.tax_rate,
                 modifiers_json=item_data.modifiers_json,
                 removed_supplies_json=item_data.removed_supplies_json,
+                unit_id=unit_id,
+                unit_symbol=unit_symbol,
             )
             self.db.add(item)
 
             # Deducir inventario de producto
-            await self._deduct_stock(item_data.product_id, item_data.variant_id, item_data.quantity, data.store_id)
+            await self._deduct_stock(item_data.product_id, item_data.variant_id, qty, data.store_id)
 
             # Deducir insumos vinculados al producto
-            await self._deduct_supplies(item_data.product_id, item_data.quantity, item_data.removed_supplies_json)
+            await self._deduct_supplies(item_data.product_id, qty, item_data.removed_supplies_json)
 
         # Crear pagos
         for pay_data in data.payments:
@@ -223,9 +260,13 @@ class SaleService:
 
         await self.db.flush()
 
-    async def _deduct_stock(self, product_id: UUID | None, variant_id: UUID | None, quantity: int, store_id: UUID | None = None):
+    async def _deduct_stock(self, product_id: UUID | None, variant_id: UUID | None, quantity, store_id: UUID | None = None):
         if not product_id:
             return
+
+        # Normalizar a Decimal para mezclar con SQLAlchemy Numeric (que retorna Decimal)
+        from decimal import Decimal
+        qty = Decimal(str(quantity))
 
         # Check if store allows sales without stock
         allow_negative = False
@@ -240,16 +281,16 @@ class SaleService:
             result = await self.db.execute(select(ProductVariant).where(ProductVariant.id == variant_id))
             variant = result.scalar_one_or_none()
             if variant:
-                if not allow_negative and variant.stock < quantity:
+                if not allow_negative and Decimal(str(variant.stock or 0)) < qty:
                     raise HTTPException(status_code=400, detail=f"Stock insuficiente para variante (disponible: {variant.stock})")
-                variant.stock -= quantity
+                variant.stock = Decimal(str(variant.stock or 0)) - qty
         else:
             result = await self.db.execute(select(Product).where(Product.id == product_id))
             product = result.scalar_one_or_none()
             if product and not product.has_variants:
-                if not allow_negative and product.stock < quantity:
+                if not allow_negative and Decimal(str(product.stock or 0)) < qty:
                     raise HTTPException(status_code=400, detail=f"Stock insuficiente para '{product.name}' (disponible: {product.stock})")
-                product.stock -= quantity
+                product.stock = Decimal(str(product.stock or 0)) - qty
 
     async def _deduct_supplies(self, product_id: UUID | None, quantity: int, removed_supplies_json: list[dict] | None = None):
         """Deduct linked supplies from inventory. Allows negative stock."""

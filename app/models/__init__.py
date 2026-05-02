@@ -3,6 +3,7 @@ from app.models.auth import Session, JwtToken
 from app.models.store import BusinessType, Store, StoreConfig, Currency, Country
 from app.models.organization import Organization
 from app.models.catalog import Category, Subcategory, ProductType, Product, ProductImage, Brand
+from app.models.unit import UnitOfMeasure
 from app.models.attribute import AttributeDefinition, ProductAttribute
 from app.models.variant import VariantGroup, VariantOption, ProductVariant
 from app.models.supply import Supply, ProductSupply
@@ -31,6 +32,7 @@ __all__ = [
     "BusinessType", "Store", "StoreConfig", "Currency", "Country",
     "Organization",
     "Category", "Subcategory", "ProductType", "Product", "ProductImage", "Brand",
+    "UnitOfMeasure",
     "AttributeDefinition", "ProductAttribute",
     "VariantGroup", "VariantOption", "ProductVariant",
     "Supply", "ProductSupply",

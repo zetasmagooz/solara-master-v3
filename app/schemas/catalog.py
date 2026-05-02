@@ -179,6 +179,18 @@ class CategoryWithSubcategories(CategoryResponse):
     subcategories: list[SubcategoryResponse] = []
 
 
+# --- Unit of Measure (catálogo global) ---
+class UnitOfMeasureResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    symbol: str
+    category: str
+    decimals: int
+
+    model_config = {"from_attributes": True}
+
+
 # --- Products ---
 class ProductCreate(BaseModel):
     category_id: UUID | None = None
@@ -204,6 +216,11 @@ class ProductCreate(BaseModel):
     sort_order: int = 0
     preparation_time: int | None = None
     attributes: list[ProductAttributeCreate] = []
+    # ── Venta a granel (opcional, default off) ──
+    is_bulk: bool = False
+    unit_id: int | None = None
+    bulk_min_quantity: float | None = None
+    bulk_step: float | None = None
 
 
 class ProductUpdate(BaseModel):
@@ -230,6 +247,11 @@ class ProductUpdate(BaseModel):
     sort_order: int | None = None
     is_favorite: bool | None = None
     preparation_time: int | None = None
+    # ── Venta a granel ──
+    is_bulk: bool | None = None
+    unit_id: int | None = None
+    bulk_min_quantity: float | None = None
+    bulk_step: float | None = None
 
 
 class ProductResponse(BaseModel):
@@ -264,6 +286,12 @@ class ProductResponse(BaseModel):
     brand: BrandResponse | None = None
     attributes: list[ProductAttributeResponse] = []
     images: list["ProductImageResponse"] = []
+    # ── Venta a granel ──
+    is_bulk: bool = False
+    unit_id: int | None = None
+    unit: UnitOfMeasureResponse | None = None
+    bulk_min_quantity: float | None = None
+    bulk_step: float | None = None
 
     model_config = {"from_attributes": True}
 
