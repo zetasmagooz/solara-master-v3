@@ -100,10 +100,13 @@ async def login(data: LoginRequest, db: Annotated[AsyncSession, Depends(get_db)]
             .values(is_active=False, ended_at=datetime.now(), close_reason="new_login_other_device")
         )
 
-    # Registrar sesión nueva
+    # Registrar sesión nueva — geolocation es opcional, nunca bloquea login
     geo = None
-    if data.latitude is not None and data.longitude is not None:
-        geo = f"{data.latitude},{data.longitude}"
+    try:
+        if data.latitude is not None and data.longitude is not None:
+            geo = f"{float(data.latitude)},{float(data.longitude)}"
+    except (TypeError, ValueError):
+        geo = None
     session = SessionModel(
         user_id=user.id,
         store_id=user.default_store_id,
