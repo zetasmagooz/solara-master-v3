@@ -1,4 +1,3 @@
-import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, select, update
@@ -14,8 +13,6 @@ from app.utils.geo import STORE_RADIUS_METERS, find_nearest_store, haversine_dis
 from app.utils.security import create_access_token, create_refresh_token, hash_password, verify_password
 
 TRIAL_DAYS = 30
-
-logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -152,20 +149,17 @@ class AuthService:
 
         auto_detected_store: str | None = None
 
-        # Owner GPS auto-detección de tienda más cercana — opcional, nunca bloquea login
+        # Owner GPS auto-detección de tienda más cercana
         if user.is_owner and data.latitude is not None and data.longitude is not None:
-            try:
-                stores_result = await self.db.execute(
-                    select(Store).where(Store.owner_id == user.id, Store.is_active.is_(True))
-                )
-                owner_stores = stores_result.scalars().all()
-                nearest = find_nearest_store(float(data.latitude), float(data.longitude), owner_stores)
-                if nearest and nearest.id != user.default_store_id:
-                    user.default_store_id = nearest.id
-                    await self.db.flush()
-                    auto_detected_store = nearest.name
-            except Exception as e:
-                logger.warning("GPS auto-detect falló para user %s: %s", user.id, e)
+            stores_result = await self.db.execute(
+                select(Store).where(Store.owner_id == user.id, Store.is_active.is_(True))
+            )
+            owner_stores = stores_result.scalars().all()
+            nearest = find_nearest_store(float(data.latitude), float(data.longitude), owner_stores)
+            if nearest and nearest.id != user.default_store_id:
+                user.default_store_id = nearest.id
+                await self.db.flush()
+                auto_detected_store = nearest.name
 
         # Restricción de tienda: el empleado solo puede iniciar sesión en su tienda asignada
         # (default_store_id se fija al crear el usuario y no puede cambiarse por no-owners)
