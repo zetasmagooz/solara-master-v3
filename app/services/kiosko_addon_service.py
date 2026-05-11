@@ -183,6 +183,9 @@ class KioskoAddonService:
             last_changed_by_user_id=owner_user.id,
         )
         self.db.add(password)
+        # Asignar la relación in-memory: evita lazy-load posterior en serialización
+        # (de lo contrario _to_response intenta await fuera de greenlet → MissingGreenlet).
+        kiosko.password = password
 
         # Incrementa quantity en la suscripción (o crea si es el primer kiosko)
         sub_addon_q = await self.db.execute(
