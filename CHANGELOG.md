@@ -1,5 +1,19 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-05-11
+
+### fix(billing/kiosko): el cobro del addon se acumula al siguiente corte (sin prorrateo)
+
+Comportamiento solicitado: si un owner contrata un kiosko a mitad de ciclo (ej. día 15), NO se cobra prorrateo inmediato — el costo del kiosko (×N) se acumula y se factura completo en el siguiente corte natural de la suscripción. Cancelaciones simétricas: no generan credit note.
+
+- **`StripeBillingService.sync_addon_quantity`** (`app/services/stripe_billing.py:942-1026`):
+  - `SubscriptionItem.create` (alta primer kiosko): `proration_behavior` cambiado de `"always_invoice"` a `"none"`.
+  - `SubscriptionItem.modify` (cambio de quantity): `proration_behavior` cambiado de `"always_invoice"` a `"none"`.
+  - `SubscriptionItem.delete` (baja último kiosko): `proration_behavior` cambiado de `"create_prorations"` a `"none"`.
+- **Efecto en Stripe**: al agregar/quitar/modificar el SubscriptionItem del addon kiosko, Stripe **no emite invoice item** de prorrateo. La nueva quantity se aplica con tarifa completa en el siguiente `current_period_end` del invoice recurrente.
+- **No afecta**: el item de "tienda adicional" (`sync_extra_stores_quantity`) mantiene `proration_behavior="always_invoice"`, ya que ese flujo sí cobra inmediatamente la diferencia (semántica B de stores extras).
+- **Smoke en DEV**: endpoints `/api/v1/kioskos` registrados y protegidos (401 sin auth). E2E con Stripe pendiente — requiere una org con `StripeSubscription` activa (en DEV solo había canceladas).
+
 ## 2026-04-28
 
 ### feat(employees): empleados, comisiones y reporte de nómina (Fases A-D)

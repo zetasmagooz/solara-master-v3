@@ -994,9 +994,9 @@ class StripeBillingService:
             if existing_item:
                 stripe.SubscriptionItem.delete(
                     self._get_sub_field(existing_item, "id"),
-                    proration_behavior="create_prorations",
+                    proration_behavior="none",
                 )
-                logger.info(f"[STRIPE] Removido addon item de sub {existing_sub.stripe_subscription_id}")
+                logger.info(f"[STRIPE] Removido addon item de sub {existing_sub.stripe_subscription_id} (sin crédito)")
                 return {"action": "removed", "addon_id": str(addon.id)}
             return {"action": "noop", "quantity": 0}
 
@@ -1010,16 +1010,16 @@ class StripeBillingService:
             stripe.SubscriptionItem.modify(
                 self._get_sub_field(existing_item, "id"),
                 quantity=target_qty,
-                proration_behavior="always_invoice",
+                proration_behavior="none",
             )
-            logger.info(f"[STRIPE] Addon quantity {current_qty}→{target_qty}")
+            logger.info(f"[STRIPE] Addon quantity {current_qty}→{target_qty} (sin prorrateo; se cobra al siguiente corte)")
             return {"action": "updated", "from": current_qty, "to": target_qty}
         else:
             stripe.SubscriptionItem.create(
                 subscription=existing_sub.stripe_subscription_id,
                 price=addon_price_id,
                 quantity=target_qty,
-                proration_behavior="always_invoice",
+                proration_behavior="none",
             )
-            logger.info(f"[STRIPE] Addon item agregado: qty={target_qty}")
+            logger.info(f"[STRIPE] Addon item agregado: qty={target_qty} (sin prorrateo; se cobra al siguiente corte)")
             return {"action": "added", "quantity": target_qty}
