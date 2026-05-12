@@ -9,7 +9,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_current_user_or_kiosko, get_db
 from app.models.user import User
 from app.schemas.kiosk import (
     KioskPromotionCreate,
@@ -93,7 +93,7 @@ async def _resolve_image_url(
 async def list_promotions(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
     screen: str | None = Query(default=None),
     active_only: bool = Query(default=False),
 ):

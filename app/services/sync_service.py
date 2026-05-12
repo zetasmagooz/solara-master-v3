@@ -10,7 +10,7 @@ from app.models.catalog import Category, Product
 from app.models.combo import Combo, ComboItem
 from app.models.modifier import ModifierGroup
 from app.models.sync import EntityChangelog
-from app.models.variant import ProductVariant
+from app.models.variant import ProductVariant, VariantCombinationValue
 
 
 class SyncService:
@@ -50,7 +50,11 @@ class SyncService:
             select(ProductVariant)
             .join(Product)
             .where(Product.store_id == store_id, ProductVariant.is_active.is_(True))
-            .options(selectinload(ProductVariant.variant_option))
+            .options(
+                selectinload(ProductVariant.variant_option),
+                selectinload(ProductVariant.combination_values).selectinload(VariantCombinationValue.variant_group),
+                selectinload(ProductVariant.combination_values).selectinload(VariantCombinationValue.variant_option),
+            )
         )
 
         modifier_groups = await self.db.execute(

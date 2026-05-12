@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_current_user_or_kiosko, get_db
 from app.models.user import User
 from app.constants.units import UNIT_TYPES
 from app.schemas.catalog import (
@@ -189,7 +189,7 @@ async def delete_supply(
 async def list_product_supplies(
     product_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
     """Lista los insumos asociados a un producto (receta/composición).
 

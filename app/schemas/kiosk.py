@@ -201,7 +201,7 @@ class KioskSettingsUpdate(BaseModel):
 
 class KioskSettingsResponse(BaseModel):
     id: UUID
-    store_id: UUID
+    organization_id: UUID
     logo_url: str | None = None
     primary_color: str | None = None
     secondary_color: str | None = None
@@ -221,7 +221,7 @@ class KioskSettingsResponse(BaseModel):
 
 class KioskPromotionResponse(BaseModel):
     id: UUID
-    store_id: UUID
+    organization_id: UUID
     screen: str
     title: str
     description: str | None = None

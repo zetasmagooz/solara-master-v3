@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_current_user_or_kiosko, get_db
 from app.models.user import User
 from app.schemas.catalog import (
     AttributeDefinitionCreate,
@@ -382,7 +382,7 @@ async def delete_brand(
 async def trending_products(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
     limit: int = Query(10, ge=1, le=50),
 ):
     """Retorna los IDs de los productos mas vendidos de una tienda, ordenados por popularidad.
@@ -1227,7 +1227,7 @@ async def create_explicit_product_variant(
 async def get_product_variant_matrix(
     product_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
     """Devuelve la matriz de variantes activas de un producto: dimensiones (atributos
     usados) y la lista de combinaciones con stock/precio/SKU."""

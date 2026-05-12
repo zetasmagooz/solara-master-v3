@@ -67,11 +67,12 @@ class KioskOrder(Base):
 
 class KioskPromotion(Base):
     """Banner configurable para las pantallas del kiosko (bienvenida, selección de marcas,
-    selección de productos). Se configura desde el admin y se consume en la app del kiosko."""
+    selección de productos). Se configura una vez por organización y todas las tiendas del
+    mismo negocio lo comparten — la identidad de marca es del negocio, no de cada sucursal."""
     __tablename__ = "kiosk_promotions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
     screen: Mapped[str] = mapped_column(String(30), nullable=False)  # welcome | brand_select | product_select
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -89,12 +90,14 @@ class KioskPromotion(Base):
 
 
 class KioskSettings(Base):
-    """Configuración del kiosko por tienda (una fila por store).
-    Incluye branding, comportamiento y métodos de pago aceptados."""
+    """Configuración del kiosko por organización (una fila por org).
+    Incluye branding, comportamiento y métodos de pago aceptados.
+    Todas las tiendas del mismo negocio comparten esta configuración — productos y ventas
+    siguen siendo por tienda, pero la identidad de la marca es del negocio."""
     __tablename__ = "kiosk_settings"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    store_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("stores.id"), nullable=False, unique=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, unique=True)
 
     # Branding
     logo_url: Mapped[str | None] = mapped_column(Text)

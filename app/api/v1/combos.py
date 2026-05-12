@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_current_user_or_kiosko, get_db
 from app.models.user import User
 from app.schemas.catalog import (
     ComboCreate,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/combos", tags=["combos"])
 async def list_combos(
     store_id: Annotated[UUID, Query()],
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
     """Lista todos los combos de una tienda.
 

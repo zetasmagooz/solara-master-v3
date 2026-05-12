@@ -181,6 +181,7 @@ class CatalogService:
         brand = Brand(organization_id=org_id, store_id=store_id, **kwargs)
         self.db.add(brand)
         await self.db.flush()
+        await record_change(self.db, store_id, "brand", brand.id, "create")
         return brand
 
     async def get_brand(self, brand_id: UUID):
@@ -196,6 +197,16 @@ class CatalogService:
             if value is not None:
                 setattr(brand, key, value)
         await self.db.flush()
+        # record_change requiere un store_id de la org para resolver el broadcast org-wide.
+        # Usamos el store_id que la brand tiene asociado (legacy) o cualquier store de la org.
+        ref_store_id = brand.store_id
+        if ref_store_id is None:
+            any_store = await self.db.execute(
+                select(Store.id).where(Store.organization_id == brand.organization_id).limit(1)
+            )
+            ref_store_id = any_store.scalar_one_or_none()
+        if ref_store_id:
+            await record_change(self.db, ref_store_id, "brand", brand.id, "update")
         return brand
 
     async def delete_brand(self, brand_id: UUID) -> bool:
@@ -205,6 +216,14 @@ class CatalogService:
             return False
         brand.is_active = False
         await self.db.flush()
+        ref_store_id = brand.store_id
+        if ref_store_id is None:
+            any_store = await self.db.execute(
+                select(Store.id).where(Store.organization_id == brand.organization_id).limit(1)
+            )
+            ref_store_id = any_store.scalar_one_or_none()
+        if ref_store_id:
+            await record_change(self.db, ref_store_id, "brand", brand_id, "delete")
         return True
 
     # --- Products ---

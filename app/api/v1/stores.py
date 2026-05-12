@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db, require_owner
+from app.dependencies import get_current_user, get_current_user_or_kiosko, get_db, require_owner
+from app.models.kiosk import KioskDevice
 from app.models.auth import Session
 from app.models.organization import Organization
 from app.models.store import Store, StoreConfig
@@ -370,9 +371,13 @@ async def create_store(
 @router.get("/", response_model=list[StoreResponse])
 async def list_stores(
     db: Annotated[AsyncSession, Depends(get_db)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    principal: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
-    """Lista las tiendas del usuario. Owners ven todas; empleados solo las activas.
+    """Lista las tiendas según el contexto del JWT:
+    - Usuario humano (User): tiendas del owner. Empleados solo activas.
+    - Kiosko (KioskDevice): solo las tiendas de la organización a la que pertenece
+      el kiosko, todas activas. Permite que el kiosko ofrezca un selector seguro
+      dentro de su propia organización.
 
     **Ejemplo curl:**
     ```bash
@@ -380,9 +385,24 @@ async def list_stores(
       -H "Authorization: Bearer {token}"
     ```
     """
-    query = select(Store).where(Store.owner_id == current_user.id)
-    # Non-owners solo ven tiendas activas
-    if not current_user.is_owner:
+    if isinstance(principal, KioskDevice):
+        # Resolver organization_id desde el store del kiosko
+        own_store_res = await db.execute(
+            select(Store.organization_id).where(Store.id == principal.store_id)
+        )
+        org_id = own_store_res.scalar_one_or_none()
+        if not org_id:
+            return []
+        query = select(Store).where(
+            Store.organization_id == org_id,
+            Store.is_active.is_(True),
+        )
+        result = await db.execute(query)
+        return result.scalars().all()
+
+    # Usuario humano
+    query = select(Store).where(Store.owner_id == principal.id)
+    if not principal.is_owner:
         query = query.where(Store.is_active.is_(True))
     result = await db.execute(query)
     return result.scalars().all()

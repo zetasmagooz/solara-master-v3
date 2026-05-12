@@ -158,6 +158,53 @@ async def get_current_kiosko(
     return kiosko
 
 
+async def get_current_user_or_kiosko(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Acepta JWT de usuario humano O de kiosko. Útil para endpoints de lectura
+    que el kiosko necesita consumir (settings, promociones de su tienda, etc.)
+    sin exponer un endpoint público.
+
+    Retorna User si es JWT humano, o KioskDevice si es JWT de kiosko.
+    """
+    from app.models.kiosk import KioskDevice
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(token)
+    except JWTError:
+        raise credentials_exception
+
+    # Sesión de kiosko
+    if payload.get("is_kiosko"):
+        kiosko_id = payload.get("kiosko_id") or payload.get("sub")
+        if not kiosko_id:
+            raise credentials_exception
+        result = await db.execute(
+            select(KioskDevice).where(KioskDevice.id == kiosko_id, KioskDevice.is_active.is_(True))
+        )
+        kiosko = result.scalar_one_or_none()
+        if kiosko is None:
+            raise credentials_exception
+        return kiosko
+
+    # Sesión de usuario humano
+    subject: str | None = payload.get("sub")
+    if subject is None:
+        raise credentials_exception
+    user_id = subject.rsplit("-", 1)[0] if subject.count("-") > 4 else subject
+    result = await db.execute(select(User).where(User.id == user_id, User.is_active.is_(True)))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
 # ── Backoffice dependencies ──────────────────────────────
 
 

@@ -139,10 +139,12 @@ class KioskService:
 
         items = [
             {
-                "id": i.id,
-                "product_id": i.product_id,
-                "variant_id": i.variant_id,
-                "combo_id": i.combo_id,
+                # UUIDs serializados como string para que el payload sea JSON-safe
+                # cuando se envía por WebSocket via ws.send_json.
+                "id": str(i.id),
+                "product_id": str(i.product_id) if i.product_id else None,
+                "variant_id": str(i.variant_id) if i.variant_id else None,
+                "combo_id": str(i.combo_id) if i.combo_id else None,
                 "product_name": names.get(i.product_id) if i.product_id else None,
                 "variant_name": variant_names.get(i.variant_id) if i.variant_id else None,
                 "quantity": i.quantity,
@@ -156,10 +158,10 @@ class KioskService:
         ]
 
         return {
-            "id": order.id,
-            "device_id": order.device_id,
+            "id": str(order.id),
+            "device_id": str(order.device_id) if order.device_id else None,
             "device_name": device_name,
-            "store_id": order.store_id,
+            "store_id": str(order.store_id),
             "customer_name": order.customer_name,
             "status": order.status,
             "subtotal": float(order.subtotal),
@@ -169,7 +171,7 @@ class KioskService:
             "notes": order.notes,
             "local_id": order.local_id,
             "order_type": order.order_type,
-            "created_at": order.created_at,
+            "created_at": order.created_at.isoformat() if order.created_at else None,
             "items": items,
         }
 

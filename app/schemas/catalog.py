@@ -371,6 +371,23 @@ class VariantCombinationValueResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="before")
+    @classmethod
+    def _resolve_names_from_orm(cls, data):
+        # Cuando viene un modelo ORM (VariantCombinationValue) con sus relaciones
+        # ya cargadas via selectinload, resolvemos group_name/option_name desde ellas.
+        # Si ya es dict (otros endpoints lo arman manualmente) lo dejamos pasar.
+        if isinstance(data, dict):
+            return data
+        vg = getattr(data, "variant_group", None)
+        vo = getattr(data, "variant_option", None)
+        return {
+            "variant_group_id": data.variant_group_id,
+            "variant_option_id": data.variant_option_id,
+            "group_name": vg.name if vg is not None else None,
+            "option_name": vo.name if vo is not None else None,
+        }
+
 
 class ProductVariantResponse(BaseModel):
     id: UUID
