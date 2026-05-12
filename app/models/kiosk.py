@@ -53,6 +53,11 @@ class KioskOrder(Base):
     tax: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     payment_method: Mapped[str | None] = mapped_column(String(50))
+    # Detalle provider-agnóstico de la transacción del método de pago.
+    # Ej. para tarjeta vía terminal Mifel/Clip/Banorte: {provider, transaction_id,
+    # authorization_code, card_brand, masked_card_number, raw}. El backend NO
+    # valida el contenido — sólo persiste lo que el cliente envíe.
+    payment_method_data: Mapped[dict | None] = mapped_column(JSONB)
     notes: Mapped[str | None] = mapped_column(Text)
     local_id: Mapped[str | None] = mapped_column(String(100))
     synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

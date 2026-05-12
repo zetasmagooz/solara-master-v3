@@ -35,6 +35,10 @@ class KioskOrderItemCreate(BaseModel):
 class KioskOrderCreate(BaseModel):
     customer_name: str | None = None
     payment_method: str | None = None
+    # Detalle agnóstico al proveedor de pago. Convención mínima: incluir 'provider'
+    # y 'transaction_id' si la transacción fue aprobada. Útil para auditoría, void,
+    # refund y reportes. Backend persiste tal cual sin validar contenido.
+    payment_method_data: dict | None = None
     order_type: str | None = "dine_in"
     notes: str | None = None
     local_id: str | None = None
@@ -51,6 +55,7 @@ class KioskOrderResponse(BaseModel):
     tax: float
     total: float
     payment_method: str | None = None
+    payment_method_data: dict | None = None
     notes: str | None = None
     local_id: str | None = None
     order_type: str | None = None
