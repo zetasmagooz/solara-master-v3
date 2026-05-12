@@ -42,6 +42,9 @@ class SaleCreate(BaseModel):
     shipping_type: str | None = None  # "percentage" | "fixed"
     total: float
     payment_type: int = 1  # 1=efectivo, 2=tarjeta, 3=mixto, 4=plataforma, 5=transferencia
+    # Detalle agnóstico al proveedor cuando el pago fue por terminal de tarjeta.
+    # Convención mínima: {provider, transaction_id, ...}. Backend persiste tal cual.
+    payment_method_data: dict | None = None
     platform: str | None = None
     cash_received: float | None = None
     change_amount: float | None = None
@@ -129,6 +132,7 @@ class SaleResponse(BaseModel):
     tax_type: str | None = None
     total: float
     payment_type: int = 1
+    payment_method_data: dict | None = None
     tip: float = 0
     tip_percent: float | None = None
     shipping: float = 0

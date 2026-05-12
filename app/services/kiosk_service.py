@@ -268,6 +268,9 @@ class KioskService:
                 tax=tax,
                 total=total,
                 payment_type=payment_type,
+                # Propaga el detalle de la terminal de pago (Mifel/Clip/…)
+                # para que los reportes puedan mostrar el badge correspondiente.
+                payment_method_data=data.payment_method_data,
                 platform="kiosk",
                 status="completed",
                 items=[

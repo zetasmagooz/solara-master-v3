@@ -36,6 +36,11 @@ class Sale(Base):
     discount: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     total: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     payment_type: Mapped[int] = mapped_column(Integer, default=1)  # 1=efectivo, 2=tarjeta, 3=mixto, 4=plataforma, 5=transferencia
+    # Detalle agnóstico al proveedor cuando el pago fue procesado por una terminal
+    # de tarjeta (Mifel, Clip, Banorte, Stripe Terminal...). Se propaga desde
+    # KioskOrder.payment_method_data cuando el kiosko cobra con tarjeta directa.
+    # Reportes leen este campo para mostrar badges como "Kiosko · Mifel".
+    payment_method_data: Mapped[dict | None] = mapped_column(JSONB)
     tip: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     tip_percent: Mapped[float | None] = mapped_column(Numeric(5, 2))
     discount_type: Mapped[str | None] = mapped_column(String(20))  # "percentage" | "fixed"

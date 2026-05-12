@@ -63,6 +63,7 @@ class SaleService:
             tax_type=data.tax_type,
             total=data.total,
             payment_type=data.payment_type,
+            payment_method_data=data.payment_method_data,
             tip=data.tip,
             tip_percent=data.tip_percent,
             shipping=data.shipping,
