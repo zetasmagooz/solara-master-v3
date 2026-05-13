@@ -449,12 +449,15 @@ class WarehouseService:
                     )
                     target_product = result.scalar_one_or_none()
 
-            # Fallback: buscar por nombre exacto en la tienda destino
-            if not target_product:
+            # Fallback: buscar por nombre normalizado en la tienda destino.
+            # Usar normalized_name (lowercase, sin acentos, separadores colapsados,
+            # unidades canónicas) hace que "Coca-Cola 600ml" y "coca cola 600ml"
+            # se reconozcan como el mismo producto al transferir, evitando duplicados.
+            if not target_product and source_product.normalized_name:
                 result = await self.db.execute(
                     select(Product).where(
                         Product.store_id == target_store_id,
-                        Product.name == source_product.name,
+                        Product.normalized_name == source_product.normalized_name,
                         Product.is_active == True,
                     )
                 )
