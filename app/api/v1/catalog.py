@@ -533,6 +533,8 @@ async def search_similar_products(
         return ProductSimilarResponse(query=q, normalized_query="", matches=[])
 
     # Query única con CTEs por capa; dedup por id quedándose con el mejor match_type/score.
+    # Nota: los casts usan CAST(... AS tipo) (no `::tipo`) para que asyncpg expanda
+    # correctamente los parámetros nombrados que se reutilizan varias veces.
     sql = sa_text(
         """
         WITH org_products AS (
@@ -549,27 +551,27 @@ async def search_similar_products(
             JOIN stores s ON s.id = p.store_id
             WHERE s.organization_id = :org_id
               AND p.is_active = true
-              AND (:exclude_id::uuid IS NULL OR p.id <> :exclude_id::uuid)
+              AND (CAST(:exclude_id AS uuid) IS NULL OR p.id <> CAST(:exclude_id AS uuid))
         ),
         exact_matches AS (
-            SELECT *, 'exact'::text AS match_type, 1.0::float AS score
+            SELECT *, CAST('exact' AS text) AS match_type, CAST(1.0 AS float) AS score
             FROM org_products WHERE normalized_name = :normalized
         ),
         barcode_matches AS (
-            SELECT *, 'barcode'::text AS match_type, 1.0::float AS score
+            SELECT *, CAST('barcode' AS text) AS match_type, CAST(1.0 AS float) AS score
             FROM org_products
-            WHERE :barcode::text IS NOT NULL
-              AND barcode IS NOT NULL AND barcode <> '' AND barcode = :barcode::text
+            WHERE CAST(:barcode AS text) IS NOT NULL
+              AND barcode IS NOT NULL AND barcode <> '' AND barcode = CAST(:barcode AS text)
         ),
         sku_matches AS (
-            SELECT *, 'sku'::text AS match_type, 1.0::float AS score
+            SELECT *, CAST('sku' AS text) AS match_type, CAST(1.0 AS float) AS score
             FROM org_products
-            WHERE :sku::text IS NOT NULL
-              AND sku IS NOT NULL AND sku <> '' AND sku = :sku::text
+            WHERE CAST(:sku AS text) IS NOT NULL
+              AND sku IS NOT NULL AND sku <> '' AND sku = CAST(:sku AS text)
         ),
         fuzzy_matches AS (
-            SELECT *, 'fuzzy'::text AS match_type,
-                   similarity(normalized_name, :normalized)::float AS score
+            SELECT *, CAST('fuzzy' AS text) AS match_type,
+                   CAST(similarity(normalized_name, :normalized) AS float) AS score
             FROM org_products
             WHERE normalized_name IS NOT NULL
               AND normalized_name <> :normalized
