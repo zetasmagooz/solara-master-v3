@@ -542,9 +542,9 @@ async def search_similar_products(
                    p.base_price, p.stock, p.store_id,
                    s.name AS store_name, COALESCE(s.is_warehouse, false) AS is_warehouse,
                    (
-                       SELECT image_url FROM product_images
-                       WHERE product_id = p.id
-                       ORDER BY is_primary DESC, created_at ASC NULLS LAST
+                       SELECT pi.image_url FROM product_images pi
+                       WHERE pi.product_id = p.id
+                       ORDER BY pi.is_primary DESC, pi.created_at ASC NULLS LAST
                        LIMIT 1
                    ) AS image_url
             FROM products p
