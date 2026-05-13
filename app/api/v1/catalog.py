@@ -35,6 +35,7 @@ from app.schemas.catalog import (
     ProductImageUpload,
     ProductResponse,
     ProductSimilarMatch,
+    ProductCloneRequest,
     ProductSimilarResponse,
     ProductUpdate,
     ProductVariantResponse,
@@ -640,6 +641,49 @@ async def search_similar_products(
         )
 
     return ProductSimilarResponse(query=q, normalized_query=normalized, matches=matches)
+
+
+@router.post("/products/clone", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
+async def clone_product(
+    data: ProductCloneRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+):
+    """Clona un producto existente a otra tienda de la misma organización.
+
+    Copia: nombre, descripción, categoría, marca, subcategoría, SKU, barcode,
+    tax_rate, atributos e imágenes (mismos URLs). Aplica overrides opcionales:
+    stock, base_price, cost_price, min/max_stock.
+
+    Útil cuando el usuario crea un producto en una tienda y el sistema detecta
+    que ya existe en otra tienda de la misma organización: en vez de crear un
+    producto desconectado, lo clona para que mantenga los mismos datos
+    descriptivos y el matching de transferencias/dedup funcione.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X POST "http://66.179.92.115:8005/api/v1/catalog/products/clone" \\
+      -H "Authorization: Bearer {token}" \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "source_product_id": "{uuid-original}",
+        "target_store_id": "{uuid-tienda-destino}",
+        "stock": 0,
+        "base_price": 25.00,
+        "cost_price": 18.50
+      }'
+    ```
+    """
+    service = CatalogService(db)
+    return await service.clone_product(
+        source_product_id=data.source_product_id,
+        target_store_id=data.target_store_id,
+        stock=data.stock,
+        base_price=data.base_price,
+        cost_price=data.cost_price,
+        min_stock=data.min_stock,
+        max_stock=data.max_stock,
+    )
 
 
 # --- Bulk Import ---

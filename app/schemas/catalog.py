@@ -330,6 +330,27 @@ class ProductSimilarResponse(BaseModel):
     matches: list[ProductSimilarMatch] = []
 
 
+# --- Clonar producto a otra tienda de la misma organización ---
+class ProductCloneRequest(BaseModel):
+    """Clona los datos descriptivos de un producto existente a otra tienda.
+
+    Copia: nombre, descripción, categoría, marca, subcategoría, SKU, barcode,
+    tax_rate, atributos e imágenes (clones de ProductImage). NO copia variantes,
+    insumos ni grupos de modificadores en esta versión.
+
+    Los overrides son opcionales y solo aplican al producto recién creado:
+    stock, precio de venta, precio de costo y stock mínimo/máximo.
+    """
+
+    source_product_id: UUID
+    target_store_id: UUID
+    stock: float | None = None
+    base_price: float | None = None
+    cost_price: float | None = None
+    min_stock: float | None = None
+    max_stock: float | None = None
+
+
 # --- Variants ---
 class VariantGroupCreate(BaseModel):
     name: str

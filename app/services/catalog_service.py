@@ -457,6 +457,118 @@ class CatalogService:
         # Reload with relations
         return await self.get_product(product.id)
 
+    async def clone_product(
+        self,
+        source_product_id: UUID,
+        target_store_id: UUID,
+        *,
+        stock: float | None = None,
+        base_price: float | None = None,
+        cost_price: float | None = None,
+        min_stock: float | None = None,
+        max_stock: float | None = None,
+    ) -> Product:
+        """Clona un producto a otra tienda de la misma organización.
+
+        Copia campos descriptivos (nombre, descripción, categoría, marca,
+        subcategoría, SKU, barcode, tax_rate), atributos e imágenes. Los
+        overrides aplican al producto destino. No copia variantes, insumos
+        ni grupos de modificadores en esta versión.
+        """
+        from fastapi import HTTPException
+
+        source = await self.get_product(source_product_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Producto origen no encontrado")
+
+        source_org = await self._resolve_org_id(source.store_id)
+        target_org = await self._resolve_org_id(target_store_id)
+        if source_org != target_org:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede clonar entre organizaciones distintas",
+            )
+
+        if source.store_id == target_store_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede clonar a la misma tienda. Usa el producto existente.",
+            )
+
+        # Verificar que no exista ya un producto con el mismo normalized_name
+        # en la tienda destino (en cuyo caso el usuario debería ir a editarlo).
+        if source.normalized_name:
+            existing = await self.db.execute(
+                select(Product).where(
+                    Product.store_id == target_store_id,
+                    Product.normalized_name == source.normalized_name,
+                    Product.is_active.is_(True),
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Ya existe un producto con ese nombre en la tienda destino",
+                )
+
+        new_product = Product(
+            store_id=target_store_id,
+            category_id=source.category_id,
+            subcategory_id=source.subcategory_id,
+            product_type_id=source.product_type_id,
+            brand_id=source.brand_id,
+            name=source.name,
+            description=source.description,
+            sku=source.sku,
+            barcode=source.barcode,
+            base_price=base_price if base_price is not None else float(source.base_price),
+            cost_price=cost_price if cost_price is not None else (float(source.cost_price) if source.cost_price is not None else None),
+            tax_rate=source.tax_rate,
+            stock=stock if stock is not None else 0,
+            min_stock=min_stock if min_stock is not None else float(source.min_stock or 0),
+            max_stock=max_stock if max_stock is not None else (float(source.max_stock) if source.max_stock is not None else None),
+            has_variants=False,
+            has_supplies=False,
+            has_modifiers=False,
+            is_active=True,
+            show_in_pos=source.show_in_pos,
+            show_in_kiosk=source.show_in_kiosk,
+            can_return_to_inventory=source.can_return_to_inventory,
+            preparation_time=source.preparation_time,
+            is_bulk=source.is_bulk,
+            unit_id=source.unit_id,
+            bulk_min_quantity=source.bulk_min_quantity,
+            bulk_step=source.bulk_step,
+        )
+        self.db.add(new_product)
+        await self.db.flush()
+
+        # Clonar imágenes (mismo URL — apuntan al mismo archivo en el VPS).
+        for img in source.images:
+            new_img = ProductImage(
+                product_id=new_product.id,
+                image_url=img.image_url,
+                is_primary=img.is_primary,
+                sort_order=img.sort_order,
+            )
+            self.db.add(new_img)
+
+        # Clonar atributos (mismas definition_id y mismos valores).
+        for attr in source.attributes:
+            new_attr = ProductAttribute(
+                product_id=new_product.id,
+                definition_id=attr.definition_id,
+                value_text=attr.value_text,
+                value_number=attr.value_number,
+                value_boolean=attr.value_boolean,
+                value_date=attr.value_date,
+            )
+            self.db.add(new_attr)
+
+        await self.db.flush()
+        await record_change(self.db, target_store_id, "product", new_product.id, "create")
+        return await self.get_product(new_product.id)
+
     async def update_product(self, product_id: UUID, **kwargs) -> Product | None:
         result = await self.db.execute(select(Product).where(Product.id == product_id))
         product = result.scalar_one_or_none()
