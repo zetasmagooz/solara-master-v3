@@ -412,7 +412,7 @@ async def list_stores(
 async def get_store(
     store_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
     """Obtiene los datos de una tienda por su ID. Retorna 404 si no existe.
 
@@ -527,7 +527,7 @@ async def toggle_store_active(
 async def get_store_config(
     store_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    _: Annotated[User, Depends(get_current_user)],
+    _: Annotated[object, Depends(get_current_user_or_kiosko)],
 ):
     """Obtiene la configuración de una tienda (ventas sin stock, impuestos incluidos, etc.). Auto-crea si no existe.
 
