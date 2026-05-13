@@ -544,7 +544,7 @@ async def search_similar_products(
                    (
                        SELECT pi.image_url FROM product_images pi
                        WHERE pi.product_id = p.id
-                       ORDER BY pi.is_primary DESC, pi.created_at ASC NULLS LAST
+                       ORDER BY pi.is_primary DESC NULLS LAST, pi.sort_order ASC NULLS LAST, pi.id ASC
                        LIMIT 1
                    ) AS image_url
             FROM products p
