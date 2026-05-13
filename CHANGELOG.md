@@ -1,5 +1,31 @@
 # Changelog — Solara Backend (solara-master-v3)
 
+## 2026-05-13
+
+### feat(catalog): detección de productos duplicados — Fase A (prevención)
+
+Punto de partida del feature de dedup de productos. Detecta duplicados a nivel organización (no solo tienda) cuando se va a crear/editar un producto, con matching robusto contra variantes ortográficas (acentos, casing, separadores, unidades).
+
+- **`app/utils/normalization.py`** (nuevo):
+  - `normalize_product_name(name)`: lowercase + sin acentos (NFD) + separadores `-_/.,;:` → espacio + unidades canónicas (`600 ml` / `600ML` / `600-ml` → `600ml`; `1 LT` / `1L` / `1lt` → `1l`) + sin caracteres no alfanuméricos + espacios colapsados.
+  - `extract_quantity_unit(name)`: regex para detectar `<cantidad><unidad>` con normalización previa de separadores. Convierte a unidad base (`1l` → `1000ml`, `1kg` → `1000g`) para comparación.
+  - `quantities_conflict(a, b)`: True solo si ambos nombres exponen cantidad+unidad explícitas y difieren (tolerancia 0.01). Si uno no tiene cantidad, no hay conflicto detectable.
+- **Migración `pn1a2b3c4d5e`** (`alembic/versions/pn1a2b3c4d5e_products_normalized_name.py`):
+  - `CREATE EXTENSION IF NOT EXISTS pg_trgm` (ya estaba en DEV).
+  - `products.normalized_name VARCHAR(300) NULL` + índice B-tree + índice GIN `gin_trgm_ops` para `similarity()`.
+  - Backfill desde Python en batches de 500. Aplicado en DEV: 270/270 productos normalizados.
+- **`Product.normalized_name`** en `app/models/catalog.py:88` + event listener `before_insert` / `before_update` que recalcula automáticamente desde `name` en cada write a través del ORM.
+- **Schemas `ProductSimilarMatch` y `ProductSimilarResponse`** en `app/schemas/catalog.py`: producto similar con `match_type` (`exact`/`barcode`/`sku`/`fuzzy`), `score`, info de tienda (`is_warehouse`), imagen primaria.
+- **Endpoint `GET /api/v1/catalog/products/search-similar`** (`app/api/v1/catalog.py:485`):
+  - Params: `store_id`, `q` (nombre), `barcode?`, `sku?`, `exclude_id?`, `limit` (default 10), `fuzzy_threshold` (default 0.6).
+  - Resuelve `organization_id` desde `stores.organization_id` para buscar cross-tienda dentro de la misma org.
+  - 3 capas en CTE: `exact` (normalized_name idéntico) > `barcode/sku` (match exacto si se pasa el param) > `fuzzy` (`similarity() > threshold`).
+  - Dedup por `id` quedándose con el match de mayor confianza. Orden final: tipo (exact < barcode < sku < fuzzy) → score DESC → name.
+  - **Guardrail**: descarta matches `fuzzy` cuando `quantities_conflict(q, match.name)` (ej. `agua 1l` vs `agua 600ml`).
+- **Casos detectados en DEV** post-backfill: org Crepas tiene 5 copias de "Coca-Cola 600ml", 7 de "Dona de chocolate" (variantes con espacio extra/casing), 5 de "Agua Mineral Bonafont 600ml", etc. Esto valida que el feature ataca duplicados reales acumulados por crear el mismo producto en cada tienda.
+- **Smoke test contra DEV**: query `coca cola 600` (sin acento, sin ml) devuelve las 5 instancias de "Coca-Cola 600ml" en 4 tiendas + 1 almacén con score 0.733 (fuzzy). Query `cafe americano` matchea con score 1.0 (exact) las 3 copias.
+- **Siguiente fase (B)**: pantalla de dedup retroactivo en backoffice (merge de duplicados existentes), antes de Fase C (migración products a org-scoped + `store_inventory`).
+
 ## 2026-05-11
 
 ### fix(billing/kiosko): el cobro del addon se acumula al siguiente corte (sin prorrateo)

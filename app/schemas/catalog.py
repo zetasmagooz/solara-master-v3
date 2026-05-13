@@ -303,6 +303,33 @@ class ProductResponse(BaseModel):
         return None
 
 
+# --- Búsqueda de productos similares (dedup) ---
+class ProductSimilarMatch(BaseModel):
+    """Coincidencia encontrada al buscar producto similar dentro de la organización."""
+
+    id: UUID
+    name: str
+    normalized_name: str | None = None
+    sku: str | None = None
+    barcode: str | None = None
+    base_price: float
+    stock: float
+    image_url: str | None = None
+    store_id: UUID
+    store_name: str
+    is_warehouse: bool = False
+    match_type: str  # "exact" | "barcode" | "sku" | "fuzzy"
+    score: float  # 1.0 para exact/barcode/sku, similarity() para fuzzy
+
+
+class ProductSimilarResponse(BaseModel):
+    """Resultado de búsqueda de duplicados. matches vacío = nombre único en la org."""
+
+    query: str
+    normalized_query: str
+    matches: list[ProductSimilarMatch] = []
+
+
 # --- Variants ---
 class VariantGroupCreate(BaseModel):
     name: str

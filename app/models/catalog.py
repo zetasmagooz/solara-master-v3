@@ -1,11 +1,12 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Numeric, ForeignKey, Integer, String, Text, text
+from sqlalchemy import Boolean, Date, DateTime, Numeric, ForeignKey, Integer, String, Text, event, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.utils.normalization import normalize_product_name
 
 
 class Brand(Base):
@@ -85,6 +86,7 @@ class Product(Base):
     product_type_id: Mapped[int] = mapped_column(Integer, ForeignKey("product_types.id"), server_default=text("1"), default=1)
     brand_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("brands.id"))
     name: Mapped[str] = mapped_column(String(300), nullable=False)
+    normalized_name: Mapped[str | None] = mapped_column(String(300), index=True)
     description: Mapped[str | None] = mapped_column(Text)
     sku: Mapped[str | None] = mapped_column(String(100))
     barcode: Mapped[str | None] = mapped_column(String(100))
@@ -145,3 +147,9 @@ from app.models.supply import ProductSupply  # noqa: E402, F401
 from app.models.modifier import ProductModifierGroup  # noqa: E402, F401
 from app.models.attribute import ProductAttribute  # noqa: E402, F401
 from app.models.unit import UnitOfMeasure  # noqa: E402, F401
+
+
+@event.listens_for(Product, "before_insert")
+@event.listens_for(Product, "before_update")
+def _sync_product_normalized_name(_mapper, _connection, target: Product) -> None:
+    target.normalized_name = normalize_product_name(target.name)

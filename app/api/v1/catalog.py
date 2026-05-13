@@ -34,6 +34,8 @@ from app.schemas.catalog import (
     ProductImageUpdate,
     ProductImageUpload,
     ProductResponse,
+    ProductSimilarMatch,
+    ProductSimilarResponse,
     ProductUpdate,
     ProductVariantResponse,
     ProductVariantUpdate,
@@ -480,6 +482,162 @@ async def create_product(
     if attributes_data:
         return await service.create_product_with_attributes(store_id, attributes_data, **payload)
     return await service.create_product(store_id, **payload)
+
+
+# --- Búsqueda de productos similares (dedup) ---
+@router.get("/products/search-similar", response_model=ProductSimilarResponse)
+async def search_similar_products(
+    store_id: Annotated[UUID, Query(description="Tienda actual; se usa para derivar la organización")],
+    q: Annotated[str, Query(min_length=1, max_length=300, description="Nombre del producto a buscar")],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _: Annotated[User, Depends(get_current_user)],
+    barcode: Annotated[str | None, Query(description="Código de barras opcional para match definitivo")] = None,
+    sku: Annotated[str | None, Query(description="SKU opcional para match definitivo")] = None,
+    exclude_id: Annotated[UUID | None, Query(description="Producto a excluir (editar caso)")] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    fuzzy_threshold: Annotated[float, Query(ge=0.3, le=0.95)] = 0.6,
+):
+    """Busca productos duplicados o muy similares dentro de la misma organización.
+
+    Aplica 3 capas en orden de confianza:
+    1. **exact**: nombre normalizado idéntico (mismo trim, acentos, separadores, unidades canónicas).
+    2. **barcode** / **sku**: coincidencia exacta cuando se pasa el parámetro y el producto lo tiene.
+    3. **fuzzy**: similarity(normalized_name, q) > fuzzy_threshold via pg_trgm.
+
+    Aplica un guardrail anti-falsos-positivos: si dos productos tienen cantidad+unidad
+    explícitas (ej. 600ml vs 1l) y difieren, no se sugieren aunque pg_trgm los empareje.
+
+    **Ejemplo curl:**
+    ```bash
+    curl -X GET "http://66.179.92.115:8005/api/v1/catalog/products/search-similar?store_id={store_id}&q=Coca%20Cola%20600" \\
+      -H "Authorization: Bearer {token}"
+    ```
+    """
+    from sqlalchemy import text as sa_text
+
+    from app.utils.normalization import normalize_product_name, quantities_conflict
+
+    # Resolver organization_id a partir del store_id (las tiendas siempre tienen org).
+    org_row = (
+        await db.execute(
+            sa_text("SELECT organization_id FROM stores WHERE id = :sid"),
+            {"sid": store_id},
+        )
+    ).first()
+    if org_row is None or org_row.organization_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tienda no encontrada o sin organización asignada")
+    org_id = org_row.organization_id
+
+    normalized = normalize_product_name(q)
+    if not normalized:
+        return ProductSimilarResponse(query=q, normalized_query="", matches=[])
+
+    # Query única con CTEs por capa; dedup por id quedándose con el mejor match_type/score.
+    sql = sa_text(
+        """
+        WITH org_products AS (
+            SELECT p.id, p.name, p.normalized_name, p.sku, p.barcode,
+                   p.base_price, p.stock, p.store_id,
+                   s.name AS store_name, COALESCE(s.is_warehouse, false) AS is_warehouse,
+                   (
+                       SELECT image_url FROM product_images
+                       WHERE product_id = p.id
+                       ORDER BY is_primary DESC, created_at ASC NULLS LAST
+                       LIMIT 1
+                   ) AS image_url
+            FROM products p
+            JOIN stores s ON s.id = p.store_id
+            WHERE s.organization_id = :org_id
+              AND p.is_active = true
+              AND (:exclude_id::uuid IS NULL OR p.id <> :exclude_id::uuid)
+        ),
+        exact_matches AS (
+            SELECT *, 'exact'::text AS match_type, 1.0::float AS score
+            FROM org_products WHERE normalized_name = :normalized
+        ),
+        barcode_matches AS (
+            SELECT *, 'barcode'::text AS match_type, 1.0::float AS score
+            FROM org_products
+            WHERE :barcode::text IS NOT NULL
+              AND barcode IS NOT NULL AND barcode <> '' AND barcode = :barcode::text
+        ),
+        sku_matches AS (
+            SELECT *, 'sku'::text AS match_type, 1.0::float AS score
+            FROM org_products
+            WHERE :sku::text IS NOT NULL
+              AND sku IS NOT NULL AND sku <> '' AND sku = :sku::text
+        ),
+        fuzzy_matches AS (
+            SELECT *, 'fuzzy'::text AS match_type,
+                   similarity(normalized_name, :normalized)::float AS score
+            FROM org_products
+            WHERE normalized_name IS NOT NULL
+              AND normalized_name <> :normalized
+              AND similarity(normalized_name, :normalized) > :threshold
+        ),
+        all_matches AS (
+            SELECT * FROM exact_matches
+            UNION ALL SELECT * FROM barcode_matches
+            UNION ALL SELECT * FROM sku_matches
+            UNION ALL SELECT * FROM fuzzy_matches
+        ),
+        ranked AS (
+            SELECT DISTINCT ON (id) *
+            FROM all_matches
+            ORDER BY id,
+                CASE match_type WHEN 'exact' THEN 0 WHEN 'barcode' THEN 1
+                                WHEN 'sku' THEN 2 ELSE 3 END,
+                score DESC
+        )
+        SELECT * FROM ranked
+        ORDER BY
+            CASE match_type WHEN 'exact' THEN 0 WHEN 'barcode' THEN 1
+                            WHEN 'sku' THEN 2 ELSE 3 END,
+            score DESC,
+            name ASC
+        LIMIT :limit
+        """
+    )
+
+    rows = (
+        await db.execute(
+            sql,
+            {
+                "org_id": org_id,
+                "normalized": normalized,
+                "barcode": barcode,
+                "sku": sku,
+                "exclude_id": exclude_id,
+                "threshold": fuzzy_threshold,
+                "limit": limit,
+            },
+        )
+    ).mappings().all()
+
+    matches: list[ProductSimilarMatch] = []
+    for row in rows:
+        # Guardrail: descartar fuzzy con cantidad/unidad incompatible.
+        if row["match_type"] == "fuzzy" and quantities_conflict(q, row["name"]):
+            continue
+        matches.append(
+            ProductSimilarMatch(
+                id=row["id"],
+                name=row["name"],
+                normalized_name=row["normalized_name"],
+                sku=row["sku"],
+                barcode=row["barcode"],
+                base_price=float(row["base_price"]),
+                stock=float(row["stock"]),
+                image_url=row["image_url"],
+                store_id=row["store_id"],
+                store_name=row["store_name"],
+                is_warehouse=row["is_warehouse"],
+                match_type=row["match_type"],
+                score=float(row["score"]),
+            )
+        )
+
+    return ProductSimilarResponse(query=q, normalized_query=normalized, matches=matches)
 
 
 # --- Bulk Import ---
